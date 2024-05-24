@@ -1,0 +1,21 @@
+{
+    "name": "gianvoci/nanocore",
+    "description": "NanoCore is a minimal PHP library for routing, global variables management, and utility functions.",
+    "type": "library",
+    "license": "GPL-3.0",
+    "autoload": {
+        "classmap": [
+            "."
+        ]
+    },
+    "authors": [
+        {
+            "name": "Giancarlo Voci",
+            "email": "softword@gvoci.com"
+        }
+    ],
+    "minimum-stability": "dev",
+    "require": {
+        "php": ">=8.0"
+    }
+}

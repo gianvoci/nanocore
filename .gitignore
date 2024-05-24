@@ -1,0 +1,4 @@
+config.json
+.vscode
+.prettierrc
+/vendor/
