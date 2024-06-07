@@ -40,11 +40,32 @@ class NanoCore
   private string $basePath;
   private ?string $configFile;
 
-  public function __construct(string $configFile = null)
+  public function __construct(string $configFile = 'app.json')
   {
+    $this->_setErrorHandlers();
     $this->configFile = $configFile;
     $this->basePath = $this->getBasePath();
     $this->Set('CORE.ROOT', $this->basePath);
+  }
+
+  private function _setErrorHandlers(): void
+  {
+    set_error_handler(function ($errno, $errstr, $errfile, $errline) {
+      throw new ErrorException($errstr, 0, $errno, $errfile, $errline);
+    });
+
+    set_exception_handler(function ($exception) {
+      header('Content-Type: application/json');
+      http_response_code(500);
+      echo json_encode(
+        [
+          'message' => $exception->getMessage(),
+          'code' => $exception->getCode(),
+          'file' => $exception->getFile(),
+          'line' => $exception->getLine(),
+        ]
+      );
+    });
   }
 
   /**
@@ -86,7 +107,7 @@ class NanoCore
     try {
       if (php_sapi_name() === 'cli') {
         $method = 'GET';
-        $path = $_SERVER['argv'][1];
+        $path = $_SERVER['argv'][1] ?? '/';
         $params = array_slice($_SERVER['argv'], 2);
       } else {
         $method = $_SERVER['REQUEST_METHOD'];
@@ -107,7 +128,7 @@ class NanoCore
         echo "Route not found";
       }
     } catch (\Exception $e) {
-      echo $e->getMessage();
+      throw $e;
     }
   }
 
@@ -122,6 +143,9 @@ class NanoCore
    */
   private function _loadConfig()
   {
+    if (!file_exists($this->configFile))
+      file_put_contents($this->configFile, '{}');
+
     $contents = @file_get_contents($this->configFile);
     return json_decode($contents ?? '{}', true);
   }
