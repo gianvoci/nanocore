@@ -40,14 +40,23 @@ class NanoCore
   private string $basePath;
   private ?string $configFile;
 
+
   public function __construct(string $configFile = 'app.json')
   {
     $this->_setErrorHandlers();
     $this->configFile = $configFile;
     $this->basePath = $this->getBasePath();
+    $this->_setPHPConfig();
     $this->Set('CORE.ROOT', $this->basePath);
   }
 
+  private function _setPHPConfig(): void
+  {
+    $iniSettings = $this->Get('PHP.INI');
+    foreach ($iniSettings as $setting => $value) {
+      ini_set($setting, $value);
+    }
+  }
   private function _setErrorHandlers(): void
   {
     set_error_handler(function ($errno, $errstr, $errfile, $errline) {
@@ -76,7 +85,7 @@ class NanoCore
   private function getBasePath()
   {
     if (php_sapi_name() === 'cli') {
-      return '';
+      return getcwd();
     } else {
       return dirname($_SERVER['SCRIPT_NAME']);
     }
@@ -114,19 +123,23 @@ class NanoCore
         $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
         $path = str_replace($this->basePath, '', $path);
         $params = [];
-        parse_str(parse_url($_SERVER['REQUEST_URI'], PHP_URL_QUERY), $params);
+        parse_str(parse_url($_SERVER['REQUEST_URI'], PHP_URL_QUERY) ?? '', $params);
       }
 
-      if (isset($this->routes[$method][$path])) {
-        $handler = $this->routes[$method][$path];
-        if (is_callable($handler)) {
-          call_user_func($handler, $this, $params);
-        } else {
-          echo "Handler for route not callable";
+      $pathSplitted = explode('/', $path);
+      array_shift($pathSplitted);
+
+      foreach ($this->routes[$method] as $route => $handler) {
+        if (strpos($route, "/{$pathSplitted[0]}") === 0) {
+          if (is_callable($handler)) {
+            array_shift($pathSplitted);
+            return call_user_func($handler, $this, $pathSplitted, $params);
+          } else {
+            throw new Exception("Handler for route not callable");
+          }
         }
-      } else {
-        echo "Route not found";
       }
+      throw new Exception('Route not found');
     } catch (\Exception $e) {
       throw $e;
     }
@@ -173,7 +186,7 @@ class NanoCore
 
     $path = explode(".", $name);
     foreach ($path as $prop) {
-      $data = $data[$prop];
+      $data = $data[$prop] ?? null;
     }
     return $data ?? null;
   }
