@@ -40,19 +40,18 @@ class NanoCore
   private string $basePath;
   private ?string $configFile;
 
-
   public function __construct(string $configFile = 'app.json')
   {
     $this->_setErrorHandlers();
     $this->configFile = $configFile;
     $this->basePath = $this->getBasePath();
     $this->_setPHPConfig();
-    $this->Set('CORE.ROOT', $this->basePath);
+    $this->ConfigSet('CORE.ROOT', $this->basePath);
   }
 
   private function _setPHPConfig(): void
   {
-    $iniSettings = $this->Get('PHP.INI');
+    $iniSettings = $this->ConfigGet('PHP.INI');
     foreach ($iniSettings as $setting => $value) {
       ini_set($setting, $value);
     }
@@ -180,7 +179,7 @@ class NanoCore
    * @param string $key The key to retrieve the value for.
    * @return mixed The value associated with the key.
    */
-  public function Get($name)
+  public function ConfigGet($name)
   {
     $data = $this->_loadConfig();
 
@@ -198,7 +197,7 @@ class NanoCore
    * @param mixed $value The value to set for the key.
    * @throws Exception When there is an error saving the configuration.
    */
-  public function Set(string $prop, $value)
+  public function ConfigSet(string $prop, $value)
   {
     $config = $this->_loadConfig();
 
