@@ -39,6 +39,7 @@ class NanoCore
   private array $routes = [];
   private string $basePath;
   private ?string $configFile;
+  private array $storage = [];
 
   public function __construct(string $configFile = 'app.json')
   {
@@ -61,6 +62,7 @@ class NanoCore
     set_error_handler(function ($errno, $errstr, $errfile, $errline) {
       throw new ErrorException($errstr, 0, $errno, $errfile, $errline);
     });
+
 
     set_exception_handler(function ($exception) {
       header('Content-Type: application/json');
@@ -128,19 +130,21 @@ class NanoCore
       $pathSplitted = explode('/', $path);
       array_shift($pathSplitted);
 
-      foreach ($this->routes[$method] as $route => $handler) {
-        if (strpos($route, "/{$pathSplitted[0]}") === 0) {
-          if (is_callable($handler)) {
-            array_shift($pathSplitted);
-            return call_user_func($handler, $this, $pathSplitted, $params);
-          } else {
-            throw new Exception("Handler for route not callable");
+      if (isset($this->routes[$method])) {
+        foreach ($this->routes[$method] as $route => $handler) {
+          if (strpos($route, "/{$pathSplitted[0]}") === 0) {
+            if (is_callable($handler)) {
+              array_shift($pathSplitted);
+              return call_user_func($handler, $this, $pathSplitted, $params);
+            } else {
+              throw new Exception("Handler for route not callable");
+            }
           }
         }
       }
       throw new Exception('Route not found');
     } catch (\Exception $e) {
-      throw $e;
+      echo $e->getMessage();
     }
   }
 
@@ -303,5 +307,48 @@ class NanoCore
     $tpl = file_get_contents($filename);
 
     return str_replace(array_keys($data), array_values($data), $tpl);
+  }
+
+  /**
+   * Retrieves the specified property of nanocore.
+   *
+   * @param string $name The name of the property to retrieve.
+   * @return mixed The value of the property or the result of the method execution.
+   */
+  public function __get($name)
+  {
+    switch ($name) {
+      case 'body':
+        return $this->GetBodyRequest();
+      case 'cli':
+        return php_sapi_name() === 'cli';
+      default:
+        return $this->storage[$name] ?? null;
+    }
+  }
+
+  /**
+   * Sets a value to a specified property of the object.
+   *
+   * @param mixed $name The name of the property to set.
+   * @param mixed $value The value to set for the property.
+   * @return void
+   */
+  public function __set($name, $value)
+  {
+    $this->storage[$name] = $value;
+  }
+
+  /**
+   * Executes a command detaching from parent and logs the output to log file.
+   *
+   * @param string $cmd The command to execute.
+   * @return void
+   */
+  public function ExecDetach(string $cmd)
+  {
+    echo shell_exec("{$cmd} >>/dev/null 2>&1 >>{$this->basePath}nanocore.log &");
+    flush();
+    ob_flush();
   }
 }
