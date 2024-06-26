@@ -219,20 +219,18 @@ class NanoCore
     $this->_saveConfig($config);
   }
 
-
-
   /**
-   * Makes a cURL request to the specified URL with customizable method, parameters, and headers.
+   * A function to make a cURL request to a specified URL with optional parameters and headers.
    *
-   * @param string $url The URL to which the cURL request is made.
-   * @param string $method The HTTP method to be used for the request. Default is 'GET'.
-   * @param array $params An array of parameters to be sent with the request. Default is an empty array.
-   * @param array $headers An array of headers to be included in the request. Default is an empty array.
-   * @return mixed The decoded JSON response if successful, otherwise the raw response.
+   * @param string $url The URL to make the request to.
+   * @param string $method The HTTP method to use for the request. Defaults to 'GET'.
+   * @param mixed $params The parameters to include in the request. Defaults to null.
+   * @param array $headers The headers to include in the request.
+   * @throws \Exception When an error occurs during the cURL request.
+   * @return mixed The response from the cURL request, decoded as JSON if possible.
    */
-  public function CurlRequest($url, $method = 'GET', $params = [], $headers = [])
+  static function CurlRequest($url, $method = 'GET', $params = null, $headers = [])
   {
-    $ch = curl_init($url);
 
     $options = [
       CURLOPT_RETURNTRANSFER => true,
@@ -240,7 +238,7 @@ class NanoCore
       CURLOPT_AUTOREFERER => true,
       CURLOPT_CONNECTTIMEOUT => 30,
       CURLOPT_TIMEOUT => 30,
-      CURLOPT_MAXREDIRS => 5,
+      CURLOPT_MAXREDIRS => 5
     ];
 
     // Configura il metodo HTTP
@@ -248,10 +246,10 @@ class NanoCore
 
     if (!empty($params)) {
       $headers[] = 'Content-Type: application/json';
-      if ($method === 'GET') {
+      if ($method === 'GET' && !is_null($params)) {
         $url .= (strpos($url, '?') !== false ? '&' : '?') . http_build_query($params);
       } else
-        $options[CURLOPT_POSTFIELDS] = json_encode($params);
+        $options[CURLOPT_POSTFIELDS] = $params;
     }
 
     // Aggiungi gli headers se forniti
@@ -259,8 +257,9 @@ class NanoCore
       $options[CURLOPT_HTTPHEADER] = $headers;
     }
 
+    $ch = curl_init($url);
+
     curl_setopt_array($ch, $options);
-    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, 0);
 
     for ($retry = 0; $retry < 5 && ($response = curl_exec($ch)) === false; $retry++);
 
@@ -268,14 +267,7 @@ class NanoCore
     curl_close($ch);
 
     if ($response === false) {
-      throw new \Exception(
-        json_encode([
-          'error' => [
-            'endpoint' => $url,
-            'description' => $error
-          ]
-        ])
-      );
+      throw new \Exception("{\"endpoint\": \"$url\", \"error\": \"$error\"}");
     }
 
     // Prova a decodificare la risposta JSON
