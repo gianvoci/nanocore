@@ -219,20 +219,22 @@ class NanoCore
     $this->_saveConfig($config);
   }
 
+
   /**
    * A function to make a cURL request to a specified URL with optional parameters and headers.
    *
    * @param string $url The URL to make the request to.
-   * @param string $method The HTTP method to use for the request. Defaults to 'GET'.
-   * @param mixed $params The parameters to include in the request. Defaults to null.
-   * @param array $headers The headers to include in the request.
+   * @param array $options An optional array of options to customize the request.
+   *                       - 'method': The HTTP method to use for the request. Defaults to 'GET'.
+   *                       - 'params': The parameters to include in the request. Defaults to an empty array.
+   *                       - 'headers': The headers to include in the request. Defaults to an empty array.
    * @throws \Exception When an error occurs during the cURL request.
    * @return mixed The response from the cURL request, decoded as JSON if possible.
    */
-  static function CurlRequest($url, $method = 'GET', $params = null, $headers = [])
+  static function CurlRequest(string $url, array $options = [])
   {
 
-    $options = [
+    $curlopt = [
       CURLOPT_RETURNTRANSFER => true,
       CURLOPT_FOLLOWLOCATION => true,
       CURLOPT_AUTOREFERER => true,
@@ -241,25 +243,31 @@ class NanoCore
       CURLOPT_MAXREDIRS => 5
     ];
 
-    // Configura il metodo HTTP
-    $options[CURLOPT_CUSTOMREQUEST] = strtoupper($method);
+    // merge defaults with options
+    $options = array_merge([
+      'method' => 'GET',
+      'params' => [],
+      'headers' => []
+    ], $options);
 
-    if (!empty($params)) {
-      $headers[] = 'Content-Type: application/json';
-      if ($method === 'GET' && !is_null($params)) {
-        $url .= (strpos($url, '?') !== false ? '&' : '?') . http_build_query($params);
+    // Configura il metodo HTTP
+    $curlopt[CURLOPT_CUSTOMREQUEST] = strtoupper($options['method']);
+
+    if (!empty($options['params'])) {
+      if ($options['method'] === 'GET' && !is_null($options['params'])) {
+        $url .= (strpos($url, '?') !== false ? '&' : '?') . http_build_query($options['params']);
       } else
-        $options[CURLOPT_POSTFIELDS] = $params;
+        $curlopt[CURLOPT_POSTFIELDS] = $options['params'];
     }
 
     // Aggiungi gli headers se forniti
-    if (!empty($headers)) {
-      $options[CURLOPT_HTTPHEADER] = $headers;
+    if (!empty($options['headers'])) {
+      $curlopt[CURLOPT_HTTPHEADER] = $options['headers'];
     }
 
     $ch = curl_init($url);
 
-    curl_setopt_array($ch, $options);
+    curl_setopt_array($ch, $curlopt);
 
     for ($retry = 0; $retry < 5 && ($response = curl_exec($ch)) === false; $retry++);
 
