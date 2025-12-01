@@ -52,7 +52,7 @@ class NanoCore
 
   private function _setPHPConfig(): void
   {
-    $iniSettings = $this->ConfigGet('PHP.INI');
+    $iniSettings = $this->ConfigGet('PHP.INI') ?? [];
     foreach ($iniSettings as $setting => $value) {
       ini_set($setting, $value);
     }
@@ -64,7 +64,7 @@ class NanoCore
     });
 
 
-    set_exception_handler(function ($exception) {
+    set_exception_handler(function ($exception): void {
       header('Content-Type: application/json');
       http_response_code(500);
       echo json_encode(
@@ -99,7 +99,7 @@ class NanoCore
    * @param string $path The path of the route.
    * @param mixed $handler The handler for the route.
    */
-  public function addRoute($method, $path, $handler)
+  public function addRoute($method, $path, $handler): void
   {
     // Rimuovi il percorso della sottocartella dalla route se presente
     $path = str_replace($this->basePath, '', $path);
@@ -111,43 +111,60 @@ class NanoCore
    * A method to run the application logic based on the request method and route.
    *
    * @throws \Exception When an error occurs during the application execution.
+   * @return mixed The response from the handler.
    */
   public function run()
   {
     try {
-      if (php_sapi_name() === 'cli') {
-        $method = 'GET';
-        $path = $_SERVER['argv'][1] ?? '/';
-        $params = array_slice($_SERVER['argv'], 2);
+      $requestMethod = $_SERVER['REQUEST_METHOD'];
+      $requestPath = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+      $requestPath = str_replace($this->basePath, '', $requestPath);
+      $requestParams = [];
+
+      if (php_sapi_name() !== 'cli') {
+        parse_str(parse_url($_SERVER['REQUEST_URI'], PHP_URL_QUERY) ?? '', $requestParams);
       } else {
-        $method = $_SERVER['REQUEST_METHOD'];
-        $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-        $path = str_replace($this->basePath, '', $path);
-        $params = [];
-        parse_str(parse_url($_SERVER['REQUEST_URI'], PHP_URL_QUERY) ?? '', $params);
+        $requestParams = array_slice($_SERVER['argv'], 2);
       }
 
-      $pathSplitted = explode('/', $path);
-      array_shift($pathSplitted);
+      $requestSegments = explode('/', trim($requestPath, '/'));
 
-      if (isset($this->routes[$method])) {
-        foreach ($this->routes[$method] as $route => $handler) {
-          if (strpos($route, "/{$pathSplitted[0]}") === 0) {
-            if (is_callable($handler)) {
-              array_shift($pathSplitted);
-              return call_user_func($handler, $this, $pathSplitted, $params);
-            } else {
-              throw new Exception("Handler for route not callable");
+      if (isset($this->routes[$requestMethod])) {
+        foreach ($this->routes[$requestMethod] as $route => $handler) {
+          $routeSegments = explode('/', trim($route, '/'));
+
+          // Match the route segments
+          $isMatch = true;
+          foreach ($routeSegments as $i => $segment) {
+            if (!isset($requestSegments[$i]) || $requestSegments[$i] !== $segment) {
+              $isMatch = false;
+              break;
             }
+          }
+
+          if ($isMatch) {
+            if (!is_callable($handler)) {
+              throw new \Exception("Handler for route not callable", 500);
+            }
+
+            $remainingSegments = array_slice($requestSegments, count($routeSegments));
+            return $handler($this, $remainingSegments, $requestParams);
           }
         }
       }
-      throw new Exception('Route not found');
-    } catch (\Exception $e) {
-      echo $e->getMessage();
+
+      throw new \Exception('Route not found', 404);
+    } catch (\Exception $exception) {
+      header('Content-Type: application/json');
+      http_response_code($exception->getCode());
+      echo json_encode([
+        'error' => $exception->getMessage(),
+        'code' => $exception->getCode(),
+        'file' => $exception->getFile(),
+        'line' => $exception->getLine(),
+      ]);
     }
   }
-
   ################
   # CONFIG MANAGER
   ################
@@ -172,7 +189,7 @@ class NanoCore
    * @param mixed $data The data to be saved.
    * @return void
    */
-  private function _saveConfig($data)
+  private function _saveConfig($data): void
   {
     file_put_contents($this->configFile, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
   }
@@ -201,7 +218,7 @@ class NanoCore
    * @param mixed $value The value to set for the key.
    * @throws Exception When there is an error saving the configuration.
    */
-  public function ConfigSet(string $prop, $value)
+  public function ConfigSet(string $prop, $value): void
   {
     $config = $this->_loadConfig();
 
@@ -334,7 +351,7 @@ class NanoCore
    * @param mixed $value The value to set for the property.
    * @return void
    */
-  public function __set($name, $value)
+  public function __set($name, $value): void
   {
     $this->storage[$name] = $value;
   }
@@ -345,7 +362,7 @@ class NanoCore
    * @param string $cmd The command to execute.
    * @return void
    */
-  public function ExecDetach(string $cmd)
+  public function ExecDetach(string $cmd): void
   {
     echo shell_exec("{$cmd} >>/dev/null 2>&1 >>{$this->basePath}nanocore.log &");
     flush();
