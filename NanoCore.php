@@ -34,6 +34,10 @@
 //   }
 // });
 
+namespace NanoCore;
+
+use ErrorException;
+
 class NanoCore
 {
   private array $routes = [];
@@ -103,6 +107,7 @@ class NanoCore
   {
     // Rimuovi il percorso della sottocartella dalla route se presente
     $path = str_replace($this->basePath, '', $path);
+    $path = str_replace('/', '', $path);
 
     $this->routes[$method][$path] = $handler;
   }
@@ -116,39 +121,28 @@ class NanoCore
   public function run()
   {
     try {
-      $requestMethod = $_SERVER['REQUEST_METHOD'];
-      $requestPath = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-      $requestPath = str_replace($this->basePath, '', $requestPath);
-      $requestParams = [];
 
       if (php_sapi_name() !== 'cli') {
-        parse_str(parse_url($_SERVER['REQUEST_URI'], PHP_URL_QUERY) ?? '', $requestParams);
+        $method = $_SERVER['REQUEST_METHOD'];
+        $uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+        parse_str(parse_url($_SERVER['REQUEST_URI'], PHP_URL_QUERY) ?? '', $params);
       } else {
-        $requestParams = array_slice($_SERVER['argv'], 2);
+        $method = 'GET';
+        $uri = $_SERVER['argv'][1];
+        $params = array_slice($_SERVER['argv'], 2);
       }
 
-      $requestSegments = explode('/', trim($requestPath, '/'));
+      $uri = str_replace('/', '', $uri);
 
-      if (isset($this->routes[$requestMethod])) {
-        foreach ($this->routes[$requestMethod] as $route => $handler) {
-          $routeSegments = explode('/', trim($route, '/'));
-
+      if (isset($this->routes[$method])) {
+        foreach ($this->routes[$method] as $route => $handler) {
           // Match the route segments
-          $isMatch = true;
-          foreach ($routeSegments as $i => $segment) {
-            if (!isset($requestSegments[$i]) || $requestSegments[$i] !== $segment) {
-              $isMatch = false;
-              break;
-            }
-          }
-
-          if ($isMatch) {
+          if ($route === $uri) {
             if (!is_callable($handler)) {
               throw new \Exception("Handler for route not callable", 500);
             }
 
-            $remainingSegments = array_slice($requestSegments, count($routeSegments));
-            return $handler($this, $remainingSegments, $requestParams);
+            return $handler($this, $params);
           }
         }
       }
