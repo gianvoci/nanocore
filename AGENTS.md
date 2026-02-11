@@ -6,6 +6,7 @@ NanoCore is a lightweight PHP library designed to handle routing, global variabl
 
 * Lightweight Routing: Define and manage routes with ease.
 * Global Variables Management: Access and manipulate global variables securely.
+* Lightweight ORM: Simple database operations with `NanoORM` class.
 * Utility Functions: Useful integrated functions to simplify daily development tasks.
 * High Efficiency: Designed to be fast and consume minimal resources.
 * Easy Integration: Easily integrates with any existing PHP project.
@@ -96,3 +97,139 @@ $response = NanoCore::curlRequest('https://api.example.com/data', [
 | `/api//health` | `/api/health` |
 | `/subdir/app/test` (with base path `/subdir/app`) | `/test` |
 | `subdir\app\test` | `/subdir/app/test` |
+
+## NanoORM - Lightweight ORM
+
+NanoORM provides simple database table management with magic getters/setters, CRUD operations, and JOIN support.
+
+### Constructor
+
+```php
+$pdo = new PDO('mysql:host=localhost;dbname=mydb', 'user', 'pass');
+$user = new NanoORM($pdo, 'users', 'id');
+```
+
+### Magic Getters/Setters
+
+Access fields dynamically using magic methods:
+
+```php
+$user->name = 'John Doe';      // Set field
+$user->email = 'john@example.com';
+echo $user->name;              // Get field: 'John Doe'
+$user->fill(['name' => 'Jane', 'email' => 'jane@example.com']);
+$data = $user->toArray();      // Get all data as array
+```
+
+### CRUD Operations
+
+| Method | Description |
+| --- | --- |
+| `findById($id)` | Retrieve a single record by primary key. Returns `NanoORM` instance or `null`. |
+| `findBy(string $field, $value, ?int $limit = null)` | Find records by any field value. Returns array of instances. |
+| `findAll(array $conditions = [], string $orderBy = '', ?int $limit = null)` | Find all records with optional conditions, ordering, and limit. |
+| `save()` | Insert (if new) or update (if existing) the record. Returns `bool`. |
+| `delete()` | Delete the current record by primary key. Returns `bool`. |
+| `deleteWhere(array $conditions)` | Delete multiple records by conditions. Returns affected row count. |
+
+### Examples
+
+```php
+// Find by ID
+$user = (new NanoORM($pdo, 'users'))->findById(42);
+
+// Find by custom field
+$activeUsers = (new NanoORM($pdo, 'users'))->findBy('status', 'active');
+
+// Find with conditions
+$recent = (new NanoORM($pdo, 'posts'))->findAll(
+    ['published' => 1],
+    'created_at DESC',
+    10
+);
+
+// Create new record
+$user = new NanoORM($pdo, 'users');
+$user->name = 'John Doe';
+$user->email = 'john@example.com';
+$user->save();  // INSERT
+
+// Update existing record
+$user = (new NanoORM($pdo, 'users'))->findById(1);
+$user->name = 'Jane Doe';
+$user->save();  // UPDATE
+
+// Delete record
+$user->delete();
+
+// Delete by condition
+$user->deleteWhere(['status' => 'inactive']);
+```
+
+### Table Joins
+
+Use `addJoin()` to join multiple tables:
+
+```php
+$orders = new NanoORM($pdo, 'orders');
+$orders
+    ->addJoin('users', 'user_id', 'id', 'INNER', ['name', 'email'])
+    ->addJoin('products', 'product_id', 'id', 'LEFT', ['title', 'price']);
+
+$results = $orders->fetchWithJoins(['orders.status' => 'completed']);
+```
+
+#### addJoin Parameters
+
+| Parameter | Description |
+| --- | --- |
+| `$table` | Table name to join |
+| `$localKey` | Field in main table |
+| `$foreignKey` | Field in joined table |
+| `$type` | JOIN type: INNER, LEFT, RIGHT (default: INNER) |
+| `$selectFields` | Array of fields to select from joined table (default: ['*']) |
+
+### Utility Methods
+
+| Method | Description |
+| --- | --- |
+| `getId()` | Get the primary key value |
+| `isNew()` | Check if record is new (not yet saved) |
+| `getTable()` | Get the table name |
+| `clear()` | Reset the object to a fresh state |
+| `fill(array $data)` | Bulk set fields from array |
+| `toArray()` | Get all data as associative array |
+
+### Complete Example
+
+```php
+use NanoCore\NanoCore;
+use NanoCore\NanoORM;
+
+$app = new NanoCore();
+
+// Setup database connection
+$pdo = new PDO('sqlite:app.db');
+
+$app->addRoute('GET', '/users/@id', function ($app, $params) use ($pdo) {
+    $user = (new NanoORM($pdo, 'users'))->findById($params['id']);
+    
+    if (!$user) {
+        throw new \Exception('User not found', 404);
+    }
+    
+    return $user->toArray();
+});
+
+$app->addRoute('POST', '/users', function ($app, $params) use ($pdo) {
+    $body = $app->body;
+    
+    $user = new NanoORM($pdo, 'users');
+    $user->fill($body);
+    $user->save();
+    
+    return ['id' => $user->getId(), 'message' => 'User created'];
+});
+
+$app->run();
+```
