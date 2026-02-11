@@ -4,9 +4,9 @@
     "type": "library",
     "license": "GPL-3.0",
     "autoload": {
-        "classmap": [
-            "."
-        ]
+        "psr-4": {
+            "NanoCore\\": ""
+        }
     },
     "authors": [
         {
