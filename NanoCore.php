@@ -85,13 +85,81 @@ class NanoCore
      *
      * @return string The base path determined based on the server API.
      */
-    private function getBasePath()
+    private function getBasePath(): string
     {
         if (php_sapi_name() === 'cli') {
-            return getcwd();
-        } else {
-            return dirname($_SERVER['SCRIPT_NAME']);
+            return '';
         }
+
+        $scriptName = $_SERVER['SCRIPT_NAME'] ?? '';
+        $basePath = rtrim(str_replace('\\', '/', dirname($scriptName)), '/');
+
+        return ($basePath === '' || $basePath === '.') ? '' : $basePath;
+    }
+
+    /**
+     * Normalize route paths for consistent route registration and lookup.
+     */
+    private function normalizeRoutePath(string $path): string
+    {
+        $path = str_replace('\\', '/', $path);
+        $path = preg_replace('#/+#', '/', $path);
+        $path = '/' . ltrim((string)$path, '/');
+        $path = rtrim($path, '/');
+
+        return $path === '' ? '/' : $path;
+    }
+
+    /**
+     * Strip configured base path from a normalized route path.
+     */
+    private function removeBasePathPrefix(string $path): string
+    {
+        if ($this->basePath === '') {
+            return $path;
+        }
+
+        if (str_starts_with($path, $this->basePath)) {
+            $path = substr($path, strlen($this->basePath));
+            $path = $path === false ? '' : $path;
+        }
+
+        return $this->normalizeRoutePath($path);
+    }
+
+    /**
+     * Convert route definitions to a regex and return captured path parameter names.
+     */
+    private function buildRoutePattern(string $path, array &$paramNames): string
+    {
+        $paramNames = [];
+
+        if ($path === '/') {
+            return '#^/$#';
+        }
+
+        $segments = explode('/', ltrim($path, '/'));
+        $parts = [];
+
+        foreach ($segments as $segment) {
+            if ($segment === '@*') {
+                $paramNames[] = 'wildcard';
+                $parts[] = '(?P<wildcard>.*)';
+                break;
+            }
+
+            if (str_starts_with($segment, '@')) {
+                $name = preg_replace('/[^a-zA-Z0-9_]/', '', substr($segment, 1));
+                $name = $name === '' ? 'param' . count($paramNames) : $name;
+                $paramNames[] = $name;
+                $parts[] = '(?P<' . $name . '>[^/]+)';
+                continue;
+            }
+
+            $parts[] = preg_quote($segment, '#');
+        }
+
+        return '#^/' . implode('/', $parts) . '$#';
     }
 
     /**
@@ -103,11 +171,17 @@ class NanoCore
      */
     public function addRoute($method, $path, $handler): void
     {
-        // Rimuovi il percorso della sottocartella dalla route se presente
-        $path = str_replace($this->basePath, '', $path);
-        $path = str_replace('/', '', $path);
+        $method = strtoupper((string)$method);
+        $path = $this->removeBasePathPrefix($this->normalizeRoutePath((string)$path));
 
-        $this->routes[$method][$path] = $handler;
+        $paramNames = [];
+        $pattern = $this->buildRoutePattern($path, $paramNames);
+
+        $this->routes[$method][] = [
+            'handler' => $handler,
+            'pattern' => $pattern,
+            'params' => $paramNames,
+        ];
     }
 
     /**
@@ -119,28 +193,40 @@ class NanoCore
     public function run()
     {
         try {
-            if (php_sapi_name() !== 'cli') {
-                $method = $_SERVER['REQUEST_METHOD'];
-                $uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-                parse_str(parse_url($_SERVER['REQUEST_URI'], PHP_URL_QUERY) ?? '', $params);
-            } else {
-                $method = 'GET';
-                $uri = $_SERVER['argv'][1];
-                $params = array_slice($_SERVER['argv'], 2);
+            $method = strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET'));
+            $rawUri = $_SERVER['REQUEST_URI'] ?? ($_SERVER['argv'][1] ?? '/');
+            $params = php_sapi_name() === 'cli' ? array_slice($_SERVER['argv'], 2) : [];
+
+            $parsedPath = parse_url($rawUri, PHP_URL_PATH) ?? '/';
+            $queryString = parse_url($rawUri, PHP_URL_QUERY) ?? '';
+            if ($queryString !== '') {
+                $queryParams = [];
+                parse_str($queryString, $queryParams);
+                $params = array_merge($params, $queryParams);
             }
 
-            $uri = str_replace('/', '', $uri);
+            $uri = $this->removeBasePathPrefix($this->normalizeRoutePath((string)$parsedPath));
 
             if (isset($this->routes[$method])) {
-                foreach ($this->routes[$method] as $route => $handler) {
-                    // Match the route segments
-                    if ($route === $uri) {
-                        if (!is_callable($handler)) {
-                            throw new \Exception('Handler for route not callable', 500);
-                        }
-
-                        return $handler($this, $params);
+                foreach ($this->routes[$method] as $route) {
+                    if (!preg_match($route['pattern'], $uri, $matches)) {
+                        continue;
                     }
+
+                    $pathParams = [];
+                    foreach ($route['params'] as $name) {
+                        if (isset($matches[$name])) {
+                            $pathParams[$name] = $matches[$name];
+                        }
+                    }
+
+                    $finalParams = array_merge($params, $pathParams);
+
+                    if (!is_callable($route['handler'])) {
+                        throw new \Exception('Handler for route not callable', 500);
+                    }
+
+                    return $route['handler']($this, $finalParams);
                 }
             }
 
@@ -360,7 +446,9 @@ class NanoCore
     public function execDetach(string $cmd): void
     {
         $cmd = escapeshellcmd($cmd);
-        $logFile = escapeshellarg($this->basePath . 'nanocore.log');
+        $basePath = rtrim($this->basePath, '/');
+        $logPath = $basePath === '' ? 'nanocore.log' : $basePath . '/nanocore.log';
+        $logFile = escapeshellarg($logPath);
         shell_exec("{$cmd} >>/dev/null 2>&1 >> {$logFile} &");
         flush();
         ob_flush();
