@@ -233,3 +233,34 @@ $app->addRoute('POST', '/users', function ($app, $params) use ($pdo) {
 
 $app->run();
 ```
+
+## NanoORM Class Details
+
+The `NanoORM` class defined in `NanoORM.php` drives the lightweight ORM layer:
+
+* **Construction & Schema**: A `\PDO` instance, table name, and optional primary key land via the constructor, which immediately inspects the table schema (`DESCRIBE` or `PRAGMA table_info`).
+* **Data Access**: Magic getters/setters (`__get`, `__set`) respect discovered schema fields and the primary key, while `fill()`, `toArray()`, and `clear()` offer easy manipulation of field data.
+* **CRUD & Querying**: `findById`, `findBy`, and `findAll` return hydrated ORM instances that honor optional conditions, ordering, and limits. Inserts, updates, and deletes are managed via `save`, `insert`, `update`, `delete`, and `deleteWhere`, all of which use prepared statements and primary key checks.
+* **Joins Support**: `addJoin` configures foreign table joins, while `fetchWithJoins` and `buildSelectQuery` build queries that alias joined tables, expose fields with prefixes, and execute composite selects.
+* **Utilities**: Helper methods such as `hydrate`, `getId`, `isNew`, and `getTable` reveal instance state, track persistence, and assist with clarity in controllers or services.
+
+### Usage Examples
+
+```php
+$user = (new NanoORM($pdo, 'users'))
+    ->fill(['name' => 'Jane Doe', 'email' => 'jane@example.com']);
+$user->save(); // insert or update depending on isNew()
+
+$found = (new NanoORM($pdo, 'users'))->findById(1);
+if ($found) {
+    $found->email = 'jane.roe@example.com';
+    $found->save();
+}
+
+$activeUsers = (new NanoORM($pdo, 'users'))->findBy('status', 'active', 10);
+
+$orders = (new NanoORM($pdo, 'orders'))
+    ->addJoin('users', 'user_id', 'id', 'INNER', ['name'])
+    ->addJoin('products', 'product_id', 'id', 'LEFT', ['title']);
+$joinedResults = $orders->fetchWithJoins(['orders.status' => 'completed']);
+```
