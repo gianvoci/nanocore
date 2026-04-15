@@ -13,8 +13,9 @@ Two handlers are registered on instantiation:
 
 2. **Exception handler** — catches uncaught exceptions, emits JSON:
    ```json
-   {"message": "...", "code": ..., "file": "...", "line": ...}
+   {"message": "...", "code": ...}
    ```
+   File and line are intentionally excluded for security — they expose internal paths.
    Always responds with HTTP 500.
 
 ## Route Dispatch Errors (`run()`)
@@ -29,9 +30,7 @@ Response format on error:
 ```json
 {
     "error": "Exception message",
-    "code": 404,
-    "file": "/path/to/file.php",
-    "line": 42
+    "code": 404
 }
 ```
 

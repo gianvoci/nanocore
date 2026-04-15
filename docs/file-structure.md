@@ -19,8 +19,8 @@ nanocore/
 
 | File | Role |
 | --- | --- |
-| `NanoCore.php` | Core class with routing engine (pattern-based), config manager (JSON dot-notation), cURL helper with retry, HTML template renderer, detached process executor. Sets custom error/exception handlers on construction. |
-| `NanoORM.php` | ORM class accepting PDO + table name + optional primary key. Auto-discovers schema via `DESCRIBE` (MySQL) or `PRAGMA table_info` (SQLite). Provides magic getters/setters, fill/toArray, findById/findBy/findAll, save (insert or update), delete/deleteWhere, and JOIN support via addJoin/fetchWithJoins. |
+| `NanoCore.php` | Core class with routing engine (pattern-based), config manager (JSON dot-notation, in-memory cache), cURL helper with retry and linear backoff, request body parser with size limit, HTML template renderer, detached process executor. Sets custom error/exception handlers on construction (no file/line in responses). |
+| `NanoORM.php` | ORM class accepting PDO + table name + optional primary key. Validates identifiers on construction. Auto-discovers schema via `DESCRIBE` (MySQL) or `PRAGMA table_info` (SQLite). Provides magic getters/setters, fill/toArray, findById/findBy/findAll (all return cloned instances), save (insert or update), delete/deleteWhere, and JOIN support via addJoin/fetchWithJoins. Field names in conditions and join parameters are validated. ORDER BY is sanitized. |
 | `app.json` | Persisted config file. Auto-created as `{}` if missing. Accessed via `configGet('SECTION.KEY')` and `configSet('SECTION.KEY', value)`. The constructor writes `CORE.ROOT` on every instantiation. |
 | `tests/NanoCoreRoutesTest.php` | Standalone test runner (no PHPUnit dependency). Sets `$_SERVER` globals, calls `run()`, asserts response. Tests: simple route, `@id` parameter, `@*` wildcard. |
 | `tests/NanoORMTest.php` | Standalone test runner using SQLite `:memory:`. Tests: full CRUD lifecycle, deleteWhere batch delete, multi-table JOIN with aliased fields. |

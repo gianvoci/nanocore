@@ -8,6 +8,10 @@
 $pdo = new PDO('sqlite:app.db');
 $orm = new NanoORM($pdo, 'users');                    // PK defaults to 'id'
 $orm = new NanoORM($pdo, 'user_settings', 'user_id'); // Custom PK
+
+// Both table name and primary key are validated — must match /^[a-zA-Z_][a-zA-Z0-9_]*$/
+// Invalid: new NanoORM($pdo, 'my-table') → InvalidArgumentException
+// Invalid: new NanoORM($pdo, 'users', '1bad') → InvalidArgumentException
 ```
 
 ## CRUD Examples
@@ -63,9 +67,13 @@ $orders
     ->addJoin('users', 'user_id', 'id', 'INNER', ['name', 'email'])
     ->addJoin('products', 'product_id', 'id', 'LEFT', ['title', 'price']);
 
-$rows = $orders->fetchWithJoins(['orders.status' => 'completed']);
+$rows = $orders->fetchWithJoins(['status' => 'completed']);
 // $rows is array of assoc arrays with aliased fields:
 // ['id' => 1, 'status' => 'completed', 'j0_name' => 'Jane', 'j1_title' => 'Widget', ...]
+
+// Note: condition keys must be plain field names (no table prefixes, no dots).
+// Invalid: ['orders.status' => 'completed'] → InvalidArgumentException (dot not allowed)
+// For ambiguous column names with JOINs, use fetchWithJoins() without conditions and filter in PHP.
 ```
 
 ## State Methods
@@ -83,7 +91,10 @@ unset($orm->name);   // __unset — remove field from data
 ## Important Notes
 
 - `__set` silently drops fields not in the discovered schema — no error, no exception.
-- `findBy` and `findAll` return cloned instances — modifying one does not affect others.
+- `findById`, `findBy`, and `findAll` all return cloned instances — modifying one does not affect others.
 - `fetchWithJoins` returns raw arrays, not ORM instances.
 - `save()` decides insert vs update based on `isNew` flag, not PK presence.
 - `deleteWhere([])` throws — empty conditions are rejected as a safety measure against accidental full-table deletes.
+- Field names in conditions (`findBy`, `findAll`, `deleteWhere`, `fetchWithJoins`) are validated — must be plain identifiers matching `/^[a-zA-Z_][a-zA-Z0-9_]*$/`. Dotted names like `table.column` are rejected.
+- `addJoin()` validates all parameters: table, keys must be valid identifiers; type must be one of `INNER`, `LEFT`, `RIGHT`, `FULL`, `CROSS`.
+- `findAll()` sanitizes ORDER BY — column names are validated segment by segment, directions must be valid SQL keywords. Invalid input throws `InvalidArgumentException`.

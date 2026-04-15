@@ -12,8 +12,8 @@
 ## Error Handling
 
 - The constructor registers a custom error handler that converts all PHP errors to `ErrorException`.
-- A global exception handler emits JSON: `{message, code, file, line}` with HTTP 500.
-- `run()` catches exceptions and emits JSON: `{error, code, file, line}` with the exception code as HTTP status. Falls back to 500 if code is outside 100–599.
+- A global exception handler emits JSON: `{message, code}` with HTTP 500. File and line are intentionally excluded for security.
+- `run()` catches exceptions and emits JSON: `{error, code}` with the exception code as HTTP status. Falls back to 500 if code is outside 100–599.
 - Controllers using this library should throw exceptions with HTTP codes: `throw new \Exception('Not found', 404)`.
 
 ## Config System
@@ -23,11 +23,18 @@
 - `configSet` creates nested structure automatically.
 - `PHP.INI` is a special key — the constructor iterates it and calls `ini_set()` for each entry.
 
+## Config Caching
+
+- Config values are cached in memory after first read. Subsequent `configGet` calls return from cache.
+- `configSet` updates the cache only after a successful file write.
+- The cache is an in-memory property — it does not persist across requests.
+
 ## Type Patterns
 
 - `addRoute` accepts mixed method/path and casts to string internally.
 - `curlRequest` is static — called as `NanoCore::curlRequest($url, $options)`.
-- Magic properties via `__get`/`__set` on NanoCore instance: `$app->body` parses JSON input, `$app->cli` returns CLI check, arbitrary properties stored in `$storage`.
+- `curlRequest` retries up to 5 times with linear backoff (100ms, 200ms, 300ms...) and resets the curl handle between attempts.
+- Magic properties via `__get`/`__set` on NanoCore instance: `$app->body` reads request body with a 10MB size limit (configurable, throws on overflow) and parses JSON, `$app->cli` returns CLI check, arbitrary properties stored in `$storage`.
 
 ## Naming
 

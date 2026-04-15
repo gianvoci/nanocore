@@ -18,11 +18,11 @@ Lightweight PHP library providing routing, configuration management, a micro ORM
 
 | File | Description |
 | --- | --- |
-| `@docs/file-structure.md` | Directory map and purpose of each file |
-| `@docs/commands.md` | Dev, test, and lint commands |
-| `@docs/conventions-backend.md` | PHP coding conventions, patterns, and rules |
-| `@docs/conventions-database.md` | NanoORM usage, schema discovery, query patterns |
-| `@docs/rules/error-handling.md` | Exception and error handler patterns |
-| `@docs/rules/route-registration.md` | Route pattern syntax and dispatch behavior |
-| `@docs/rules/config-management.md` | Config get/set patterns and app.json structure |
-| `@docs/rules/orm-usage.md` | CRUD, hydration, joins, and magic property patterns |
+| docs/file-structure.md | Directory map and purpose of each file |
+| docs/commands.md | Dev, test, and lint commands |
+| docs/conventions-backend.md | PHP coding conventions, patterns, and rules |
+| docs/conventions-database.md | NanoORM usage, schema discovery, query patterns |
+| docs/rules/error-handling.md | Exception and error handler patterns |
+| docs/rules/route-registration.md | Route pattern syntax and dispatch behavior |
+| docs/rules/config-management.md | Config get/set patterns and app.json structure |
+| docs/rules/orm-usage.md | CRUD, hydration, joins, and magic property patterns |

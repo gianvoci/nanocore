@@ -27,7 +27,7 @@ $app->configSet('DB.PORT', 3306);
 
 ## Implementation Details
 
-- Every `configGet` call reads the file from disk (no caching).
-- Every `configSet` call reads → modifies → writes the entire file.
+- Config is cached in memory after first load. `configGet` returns from cache on subsequent calls.
+- `configSet` reads → modifies → writes the file, then updates the cache only on successful write.
 - JSON is encoded with `JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES`.
 - Config file path is configurable: `new NanoCore('custom-config.json')`.
