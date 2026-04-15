@@ -7,32 +7,6 @@
  * @since 2024-05-11
  */
 
-/**
- * Autoloader function to automatically load classes.
- * @release TBA
- *
- * The function registers a callback function to the spl_autoload_register() function
- * which is called whenever a class is not found in the current file scope.
- * The function then tries to include the file based on the class name converted
- * to a file path. For example, the class name 'App\Model\User' would be converted
- * to the file path 'App/Model/User.php'.
- */
-// spl_autoload_register(function ($className) {
-//   // Definisci il percorso delle classi
-//   $classPath = __DIR__ . '/';
-
-//   // Converte il nome della classe in un percorso del file
-//   $filePath = $classPath . str_replace('\\', '/', $className) . '.php';
-
-//   // Controlla se il file esiste e lo include
-//   if (file_exists($filePath)) {
-//     include_once $filePath;
-//   } else {
-//     // Gestisci eventuali errori di caricamento della classe
-//     throw new Exception("Classe non trovata: $className");
-//   }
-// });
-
 namespace NanoCore;
 
 use ErrorException;
@@ -42,6 +16,7 @@ class NanoCore
     private array $routes = [];
     private string $basePath;
     private ?string $configFile;
+    private ?array $configCache = null;
     private array $storage = [];
 
     public function __construct(string $configFile = 'app.json')
@@ -73,8 +48,6 @@ class NanoCore
                 [
                     'message' => $exception->getMessage(),
                     'code'    => $exception->getCode(),
-                    'file'    => $exception->getFile(),
-                    'line'    => $exception->getLine(),
                 ]
             );
         });
@@ -241,8 +214,6 @@ class NanoCore
             echo json_encode([
                 'error' => $exception->getMessage(),
                 'code'  => $exception->getCode(),
-                'file'  => $exception->getFile(),
-                'line'  => $exception->getLine(),
             ]);
         }
     }
@@ -257,12 +228,17 @@ class NanoCore
      */
     private function loadConfig()
     {
+        if ($this->configCache !== null) {
+            return $this->configCache;
+        }
+
         if (!file_exists($this->configFile)) {
             file_put_contents($this->configFile, '{}');
         }
 
         $contents = @file_get_contents($this->configFile);
-        return json_decode($contents ?? '{}', true);
+        $this->configCache = json_decode($contents ?? '{}', true);
+        return $this->configCache;
     }
 
     /**
@@ -273,7 +249,10 @@ class NanoCore
      */
     private function saveConfig($data): void
     {
-        file_put_contents($this->configFile, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+        $result = file_put_contents($this->configFile, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+        if ($result !== false) {
+            $this->configCache = $data;
+        }
     }
 
     /**
@@ -306,11 +285,11 @@ class NanoCore
 
         $path = explode('.', $prop);
         $data = &$config;
-        foreach ($path as $prop) {
-            if (!isset($data[$prop])) {
-                $data[$prop] = [];
+        foreach ($path as $segment) {
+            if (!isset($data[$segment])) {
+                $data[$segment] = [];
             }
-            $data = &$data[$prop];
+            $data = &$data[$segment];
         }
 
         $data = $value;
@@ -347,18 +326,18 @@ class NanoCore
             'headers' => [],
         ], $options);
 
-        // Configura il metodo HTTP
+        // Configure HTTP method
         $curlopt[CURLOPT_CUSTOMREQUEST] = strtoupper($options['method']);
 
         if (!empty($options['params'])) {
-            if ($options['method'] === 'GET' && !is_null($options['params'])) {
+            if ($options['method'] === 'GET') {
                 $url .= (strpos($url, '?') !== false ? '&' : '?') . http_build_query($options['params']);
             } else {
                 $curlopt[CURLOPT_POSTFIELDS] = $options['params'];
             }
         }
 
-        // Aggiungi gli headers se forniti
+        // Add headers if provided
         if (!empty($options['headers'])) {
             $curlopt[CURLOPT_HTTPHEADER] = $options['headers'];
         }
@@ -367,7 +346,18 @@ class NanoCore
 
         curl_setopt_array($ch, $curlopt);
 
-        for ($retry = 0; $retry < 5 && ($response = curl_exec($ch)) === false; $retry++);
+        $response = false;
+        for ($retry = 0; $retry < 5; $retry++) {
+            if ($retry > 0) {
+                usleep(100000 * $retry);
+                curl_reset($ch);
+                curl_setopt_array($ch, $curlopt);
+            }
+            $response = curl_exec($ch);
+            if ($response !== false) {
+                break;
+            }
+        }
 
         $error = curl_error($ch);
         curl_close($ch);
@@ -376,10 +366,9 @@ class NanoCore
             throw new \Exception("{\"endpoint\": \"$url\", \"error\": \"$error\"}");
         }
 
-        // Prova a decodificare la risposta JSON
-        return ($decodedResponse = json_decode($response)) !== null
-          ? $decodedResponse
-          : $response;
+        // Decode JSON when valid, otherwise return raw response
+        $decoded = json_decode($response, true);
+        return json_last_error() === JSON_ERROR_NONE ? $decoded : $response;
     }
 
     /**
@@ -387,10 +376,14 @@ class NanoCore
      *
      * @return mixed The decoded JSON content or the raw content if decoding fails.
      */
-    public function getBodyRequest()
+    public function getBodyRequest(int $maxBytes = 10_485_760)
     {
-        $content = file_get_contents('php://input');
-        return  json_decode($content, true) ?? $content;
+        $content = file_get_contents('php://input', false, null, 0, $maxBytes + 1);
+        if (strlen($content) > $maxBytes) {
+            throw new \Exception("Request body exceeds maximum size of {$maxBytes} bytes");
+        }
+        $decoded = json_decode($content, true);
+        return json_last_error() === JSON_ERROR_NONE ? $decoded : $content;
     }
 
     /**

@@ -34,10 +34,27 @@ class NanoORM
      */
     public function __construct(\PDO $pdo, string $table, string $primaryKey = 'id')
     {
+        $this->validateIdentifier($table, 'table name');
+        $this->validateIdentifier($primaryKey, 'primary key');
+
         $this->pdo = $pdo;
         $this->table = $table;
         $this->primaryKey = $primaryKey;
         $this->loadTableSchema();
+    }
+
+    /**
+     * Validate that a SQL identifier (table name, primary key) contains only safe characters.
+     *
+     * @param string $identifier The identifier to validate
+     * @param string $context Description of what is being validated (for error messages)
+     * @throws \InvalidArgumentException if the identifier is invalid
+     */
+    private function validateIdentifier(string $identifier, string $context): void
+    {
+        if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $identifier)) {
+            throw new \InvalidArgumentException("Invalid {$context}: '{$identifier}'");
+        }
     }
 
     /**
@@ -60,7 +77,7 @@ class NanoORM
                     $this->fields[] = $column['name'];
                 }
             } catch (\Exception $e2) {
-                throw new \Exception("Unable to load schema for table: {$this->table}");
+                throw new \Exception("Unable to load schema for table '{$this->table}'. MySQL: {$e->getMessage()}. SQLite: {$e2->getMessage()}");
             }
         }
     }
@@ -150,11 +167,12 @@ class NanoORM
             return null;
         }
 
-        return $this->hydrate($row);
+        return (clone $this)->hydrate($row);
     }
 
     /**
-     * Find records by a specific field value
+     * Find records by a specific field value.
+     * Does not apply registered JOINs. Use fetchWithJoins() for joined queries.
      *
      * @param string $field Field name
      * @param mixed $value Field value
@@ -163,6 +181,8 @@ class NanoORM
      */
     public function findBy(string $field, $value, ?int $limit = null): array
     {
+        $field = $this->validateFieldName($field);
+
         $sql = "SELECT * FROM {$this->table} WHERE {$field} = :value";
         if ($limit !== null) {
             $sql .= " LIMIT {$limit}";
@@ -196,6 +216,7 @@ class NanoORM
         if (!empty($conditions)) {
             $whereClauses = [];
             foreach ($conditions as $field => $value) {
+                $field = $this->validateFieldName($field);
                 $whereClauses[] = "{$field} = :{$field}";
                 $params[":{$field}"] = $value;
             }
@@ -203,7 +224,10 @@ class NanoORM
         }
 
         if ($orderBy !== '') {
-            $sql .= " ORDER BY {$orderBy}";
+            $orderBy = $this->sanitizeOrderBy($orderBy);
+            if ($orderBy !== '') {
+                $sql .= " ORDER BY {$orderBy}";
+            }
         }
 
         if ($limit !== null) {
@@ -239,11 +263,21 @@ class NanoORM
         string $type = 'INNER',
         array $selectFields = ['*']
     ): self {
+        $this->validateFieldName($table);
+        $this->validateFieldName($localKey);
+        $this->validateFieldName($foreignKey);
+
+        $type = strtoupper($type);
+        $allowedTypes = ['INNER', 'LEFT', 'RIGHT', 'FULL', 'CROSS'];
+        if (!in_array($type, $allowedTypes, true)) {
+            throw new \InvalidArgumentException("Invalid join type: '{$type}'");
+        }
+
         $this->joins[] = [
             'table' => $table,
             'localKey' => $localKey,
             'foreignKey' => $foreignKey,
-            'type' => strtoupper($type),
+            'type' => $type,
             'fields' => $selectFields,
         ];
         return $this;
@@ -263,6 +297,7 @@ class NanoORM
         if (!empty($conditions)) {
             $whereClauses = [];
             foreach ($conditions as $field => $value) {
+                $field = $this->validateFieldName($field);
                 $whereClauses[] = "{$field} = :{$field}";
                 $params[":{$field}"] = $value;
             }
@@ -373,8 +408,8 @@ class NanoORM
             return "{$field} = :{$field}";
         }, array_keys($data));
 
-        $sql = "UPDATE {$this->table} SET " . implode(', ', $sets) . " WHERE {$this->primaryKey} = :id";
-        $data['id'] = $id;
+        $sql = "UPDATE {$this->table} SET " . implode(', ', $sets) . " WHERE {$this->primaryKey} = :{$this->primaryKey}";
+        $data[$this->primaryKey] = $id;
 
         $stmt = $this->pdo->prepare($sql);
         return $stmt->execute($data);
@@ -392,9 +427,9 @@ class NanoORM
             throw new \Exception("Cannot delete record without primary key");
         }
 
-        $sql = "DELETE FROM {$this->table} WHERE {$this->primaryKey} = :id";
+        $sql = "DELETE FROM {$this->table} WHERE {$this->primaryKey} = :{$this->primaryKey}";
         $stmt = $this->pdo->prepare($sql);
-        $result = $stmt->execute([':id' => $this->data[$this->primaryKey]]);
+        $result = $stmt->execute([":{$this->primaryKey}" => $this->data[$this->primaryKey]]);
 
         if ($result) {
             $this->data = [];
@@ -419,6 +454,7 @@ class NanoORM
         $whereClauses = [];
         $params = [];
         foreach ($conditions as $field => $value) {
+            $field = $this->validateFieldName($field);
             $whereClauses[] = "{$field} = :{$field}";
             $params[":{$field}"] = $value;
         }
@@ -428,6 +464,66 @@ class NanoORM
         $stmt->execute($params);
 
         return $stmt->rowCount();
+    }
+
+    /**
+     * Validate that a field name contains only safe characters.
+     *
+     * @param string $field Field name to validate
+     * @return string The validated field name
+     * @throws \InvalidArgumentException if the field name is invalid
+     */
+    private function validateFieldName(string $field): string
+    {
+        if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $field)) {
+            throw new \InvalidArgumentException("Invalid field name: {$field}");
+        }
+        return $field;
+    }
+
+    /**
+     * Sanitize ORDER BY clause to prevent SQL injection.
+     *
+     * @param string $orderBy Raw order by string
+     * @return string Sanitized order by string
+     * @throws \InvalidArgumentException if any column part is invalid
+     */
+    private function sanitizeOrderBy(string $orderBy): string
+    {
+        $validDirections = ['ASC', 'DESC', 'ASC NULLS FIRST', 'DESC NULLS FIRST', 'ASC NULLS LAST', 'DESC NULLS LAST'];
+        $parts = explode(',', $orderBy);
+        $sanitized = [];
+
+        foreach ($parts as $part) {
+            $part = trim($part);
+            if ($part === '') {
+                continue;
+            }
+
+            // Split into column and optional direction
+            $tokens = preg_split('/\s+/', $part);
+            $column = $tokens[0];
+
+            // Validate each segment of a dotted column name (e.g. "t.column")
+            foreach (explode('.', $column) as $segment) {
+                if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $segment)) {
+                    throw new \InvalidArgumentException("Invalid ORDER BY column: '{$column}'");
+                }
+            }
+
+            // Rebuild with validated direction
+            if (count($tokens) > 1) {
+                $direction = strtoupper(implode(' ', array_slice($tokens, 1)));
+                if (!in_array($direction, $validDirections, true)) {
+                    throw new \InvalidArgumentException("Invalid ORDER BY direction in: '{$part}'");
+                }
+                $sanitized[] = "{$column} {$direction}";
+            } else {
+                $sanitized[] = $column;
+            }
+        }
+
+        return implode(', ', $sanitized);
     }
 
     /**
