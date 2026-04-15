@@ -40,7 +40,7 @@ Only discovered fields (and the primary key) are accepted by `__set`. Unknown fi
 ## JOINs
 
 ```php
-$orm->addJoin('table', 'localKey', 'foreignKey', 'INNER|LEFT|RIGHT', ['field1', 'field2']);
+$orm->addJoin('table', 'localKey', 'foreignKey', 'INNER|LEFT|RIGHT|FULL|CROSS', ['field1', 'field2']);
 ```
 
 - Joined tables get aliases: `j0`, `j1`, etc.

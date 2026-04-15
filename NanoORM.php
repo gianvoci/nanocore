@@ -252,7 +252,7 @@ class NanoORM
      * @param string $table Table to join
      * @param string $localKey Local field name
      * @param string $foreignKey Foreign field name
-     * @param string $type JOIN type (INNER, LEFT, RIGHT)
+     * @param string $type JOIN type (INNER, LEFT, RIGHT, FULL, CROSS)
      * @param array $selectFields Fields to select from joined table
      * @return self
      */

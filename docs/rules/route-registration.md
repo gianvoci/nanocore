@@ -34,6 +34,7 @@ Rules:
 5. Each route's regex pattern is tested against the URI.
 6. On match: path params extracted, merged with query params, handler called with `($app, $params)`.
 7. On no match after all routes: `Exception('Route not found', 404)`.
+8. Path params take precedence: if a path param and query param share the same key, the path param value wins (`array_merge` with path params second).
 
 ## URI Normalization Examples
 

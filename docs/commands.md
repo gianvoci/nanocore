@@ -13,12 +13,27 @@ Run after every change to NanoCore.php or NanoORM.php. Required by project conve
 
 ## Tests
 
+### Run All Tests
+
 ```bash
-php tests/NanoCoreRoutesTest.php
-php tests/NanoORMTest.php
+php tests/runAllTests.php
 ```
 
-Both are standalone runners (no PHPUnit). They exit with code 0 on success, 1 on failure. Each test prints pass/fail to stdout.
+Executes all 7 test files in sequence and prints a summary (7/7 passed, 0 failed). Exit code 0 if all pass, 1 if any fail.
+
+### Run Individual Tests
+
+```bash
+php tests/NanoCoreRoutesTest.php
+php tests/NanoCoreErrorHandlingTest.php
+php tests/NanoCoreConfigTest.php
+php tests/NanoCoreRouteEdgeCasesTest.php
+php tests/NanoCoreUtilitiesTest.php
+php tests/NanoORMTest.php
+php tests/NanoORMEdgeCasesTest.php
+```
+
+All are standalone runners (no PHPUnit). They exit with code 0 on success, 1 on failure. Each test prints pass/fail to stdout.
 
 ## Composer
 

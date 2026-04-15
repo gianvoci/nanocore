@@ -34,7 +34,9 @@
 - `addRoute` accepts mixed method/path and casts to string internally.
 - `curlRequest` is static — called as `NanoCore::curlRequest($url, $options)`.
 - `curlRequest` retries up to 5 times with linear backoff (100ms, 200ms, 300ms...) and resets the curl handle between attempts.
-- Magic properties via `__get`/`__set` on NanoCore instance: `$app->body` reads request body with a 10MB size limit (configurable, throws on overflow) and parses JSON, `$app->cli` returns CLI check, arbitrary properties stored in `$storage`.
+- Magic properties via `__get`/`__set` on NanoCore instance: `$app->body` reads request body via `getBodyRequest()` with a 10MB default size limit (throws on overflow). The limit is customizable only via direct `getBodyRequest($maxBytes)` calls.
+- `renderHtml` loads a template file and does string replacement from a data array.
+- `execDetach` runs a shell command in the background, logging output to `nanocore.log`.
 
 ## Naming
 
