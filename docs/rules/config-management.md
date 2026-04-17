@@ -6,6 +6,10 @@
 
 Config is persisted in `app.json` at the project root. The file is auto-created as `{}` if it doesn't exist.
 
+The config file path is validated on construction:
+- Must end in `.json`
+- Resolved to the current working directory (prevents writing to arbitrary locations)
+
 ## Dot-Notation Access
 
 ```php
@@ -18,16 +22,50 @@ $app->configSet('DB.HOST', 'localhost');         // Creates nested structure aut
 $app->configSet('DB.PORT', 3306);
 ```
 
+## Protected Keys
+
+The following top-level keys cannot be modified via `configSet`:
+
+| Key | Reason |
+| --- | --- |
+| `CORE` | Set automatically by the constructor (`CORE.ROOT`). |
+| `PHP.INI` | Controls server behavior via `ini_set()`. |
+
+Attempting `configSet('PHP.INI.display_errors', '1')` will throw an exception.
+
 ## Special Keys
 
 | Key | Purpose |
 | --- | --- |
 | `CORE.ROOT` | Set automatically by the constructor to the detected base path. Do not set manually. |
-| `PHP.INI` | Object of `ini_set` key-value pairs. Applied on every NanoCore construction. Example: `{"PHP.INI": {"display_errors": "1"}}` |
+| `PHP.INI` | Object of `ini_set` key-value pairs. Only allowed directives are applied (see `ALLOWED_INI_SETTINGS` constant in NanoCore.php). Unknown directives are silently skipped. |
+
+## INI Allowlist
+
+Only the following PHP directives may be set through `PHP.INI`. Anything else is silently ignored:
+
+| Directive |
+| --- |
+| `display_errors` |
+| `error_log` |
+| `error_reporting` |
+| `log_errors` |
+| `upload_max_filesize` |
+| `post_max_size` |
+| `max_execution_time` |
+| `memory_limit` |
+| `default_charset` |
+| `date.timezone` |
+| `session.cookie_httponly` |
+| `session.cookie_secure` |
+| `session.use_strict_mode` |
+
+This is enforced in the `ALLOWED_INI_SETTINGS` constant. To add a new directive, update the constant in `NanoCore.php`.
 
 ## Implementation Details
 
 - Config is cached in memory after first load. `configGet` returns from cache on subsequent calls.
 - `configSet` reads → modifies → writes the file, then updates the cache only on successful write.
+- `saveConfig` uses atomic writes (temp file + rename) to prevent data corruption.
 - JSON is encoded with `JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES`.
 - Config file path is configurable: `new NanoCore('custom-config.json')`.

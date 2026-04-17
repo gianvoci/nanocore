@@ -96,5 +96,5 @@ unset($orm->name);   // __unset — remove field from data
 - `save()` decides insert vs update based on `isNew` flag, not PK presence.
 - `deleteWhere([])` throws — empty conditions are rejected as a safety measure against accidental full-table deletes.
 - Field names in conditions (`findBy`, `findAll`, `deleteWhere`, `fetchWithJoins`) are validated — must be plain identifiers matching `/^[a-zA-Z_][a-zA-Z0-9_]*$/`. Dotted names like `table.column` are rejected.
-- `addJoin()` validates all parameters: table, keys must be valid identifiers; type must be one of `INNER`, `LEFT`, `RIGHT`, `FULL`, `CROSS`.
+- `addJoin()` validates all parameters: table, keys must be valid identifiers; type must be one of `INNER`, `LEFT`, `RIGHT`, `FULL`, `CROSS`. Select fields are also validated — each field (except `*` wildcard) must match `/^[a-zA-Z_][a-zA-Z0-9_]*$/`.
 - `findAll()` sanitizes ORDER BY — column names are validated segment by segment, directions must be valid SQL keywords. Invalid input throws `InvalidArgumentException`.

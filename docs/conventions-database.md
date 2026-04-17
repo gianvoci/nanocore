@@ -49,7 +49,7 @@ $orm->addJoin('table', 'localKey', 'foreignKey', 'INNER|LEFT|RIGHT|FULL|CROSS', 
 - `buildSelectQuery()` is used by both `findAll` and `fetchWithJoins`.
 - `findBy` does NOT use `buildSelectQuery()` — it builds SQL directly and ignores registered JOINs. Use `fetchWithJoins()` for joined queries.
 - Field names in conditions (`findBy`, `findAll`, `deleteWhere`, `fetchWithJoins`) are validated against `/^[a-zA-Z_][a-zA-Z0-9_]*$/`. Invalid names throw `InvalidArgumentException`.
-- `addJoin()` validates table, localKey, foreignKey against the same regex, and join type must be one of: `INNER`, `LEFT`, `RIGHT`, `FULL`, `CROSS`.
+- `addJoin()` validates table, localKey, foreignKey, and all select fields against the same regex. The `*` wildcard is allowed for select fields. Join type must be one of: `INNER`, `LEFT`, `RIGHT`, `FULL`, `CROSS`.
 - `findAll()` validates `orderBy` via `sanitizeOrderBy()` — each column segment must match the identifier regex, direction must be a valid SQL keyword (ASC, DESC, with optional NULLS FIRST/LAST). Invalid input throws `InvalidArgumentException`.
 
 ## Gotchas

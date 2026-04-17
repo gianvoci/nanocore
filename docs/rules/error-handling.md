@@ -12,11 +12,11 @@ Two handlers are registered on instantiation:
    ```
 
 2. **Exception handler** — catches uncaught exceptions, emits JSON:
-   ```json
-   {"message": "...", "code": ...}
-   ```
-   File and line are intentionally excluded for security — they expose internal paths.
-   Always responds with HTTP 500.
+    ```json
+    {"message": "...", "code": ...}
+    ```
+    File and line are intentionally excluded for security — they expose internal paths.
+    HTTP status is taken from the exception code, clamped to 100–599 range (defaults to 500 if outside range).
 
 ## Route Dispatch Errors (`run()`)
 

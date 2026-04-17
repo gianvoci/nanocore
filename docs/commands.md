@@ -19,26 +19,33 @@ Run after every change to NanoCore.php or NanoORM.php. Required by project conve
 php tests/runAllTests.php
 ```
 
-Executes all 7 test files in sequence and prints a summary (7/7 passed, 0 failed). Exit code 0 if all pass, 1 if any fail.
+Discovers and runs all test files in `tests/cases/` via glob. Prints a summary (X/Y passed, Z failed). Exit code 0 if all pass, 1 if any fail.
 
 ### Run Individual Tests
 
 ```bash
-php tests/NanoCoreRoutesTest.php
-php tests/NanoCoreErrorHandlingTest.php
-php tests/NanoCoreConfigTest.php
-php tests/NanoCoreRouteEdgeCasesTest.php
-php tests/NanoCoreUtilitiesTest.php
-php tests/NanoORMTest.php
-php tests/NanoORMEdgeCasesTest.php
+php tests/cases/RoutesTest.php
+php tests/cases/ErrorHandlingTest.php
+php tests/cases/ConfigTest.php
+php tests/cases/RouteEdgeCasesTest.php
+php tests/cases/UtilitiesTest.php
+php tests/cases/ORMTest.php
+php tests/cases/ORMEdgeCasesTest.php
+php tests/cases/JoinTest.php
 ```
 
 All are standalone runners (no PHPUnit). They exit with code 0 on success, 1 on failure. Each test prints pass/fail to stdout.
 
+### Test Structure
+
+- `tests/TestHelpers.php` — shared assertion functions, database/route helpers, and the `runTests()` runner
+- `tests/cases/*.php` — individual test files, each defining a `$tests[]` array and calling `runTests($tests)`
+- `tests/runAllTests.php` — orchestrator that discovers all `cases/*.php` files and runs them in separate processes
+
 ## Composer
 
 ```bash
-composer install        # Install dependencies (dev only, no runtime deps beyond PHP 8.0)
+composer install        # Install dependencies (dev only, no runtime deps beyond PHP 8.5)
 composer dump-autoload  # Regenerate PSR-4 autoload map after adding/moving classes
 ```
 
