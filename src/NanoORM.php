@@ -99,7 +99,7 @@ class NanoORM
      * @param string $name Field name
      * @param mixed $value Field value
      */
-    public function __set(string $name, $value): void
+    public function __set(string $name, mixed $value): void
     {
         if (in_array($name, $this->fields) || $name === $this->primaryKey) {
             $this->data[$name] = $value;
@@ -157,7 +157,7 @@ class NanoORM
      * @param mixed $id The primary key value
      * @return self|null Returns self if found, null otherwise
      */
-    public function findById($id): ?self
+    public function findById(mixed $id): ?self
     {
         $stmt = $this->pdo->prepare("SELECT * FROM {$this->table} WHERE {$this->primaryKey} = :id LIMIT 1");
         $stmt->execute([':id' => $id]);
@@ -179,7 +179,7 @@ class NanoORM
      * @param int|null $limit Maximum number of records (null for all)
      * @return array Array of NanoORM instances
      */
-    public function findBy(string $field, $value, ?int $limit = null): array
+    public function findBy(string $field, mixed $value, ?int $limit = null): array
     {
         $field = $this->validateFieldName($field);
 
@@ -266,6 +266,13 @@ class NanoORM
         $this->validateFieldName($table);
         $this->validateFieldName($localKey);
         $this->validateFieldName($foreignKey);
+
+        // Validate select fields to prevent SQL injection ('*' is a valid wildcard)
+        foreach ($selectFields as $field) {
+            if ($field !== '*') {
+                $this->validateFieldName($field, 'join select field');
+            }
+        }
 
         $type = strtoupper($type);
         $allowedTypes = ['INNER', 'LEFT', 'RIGHT', 'FULL', 'CROSS'];
@@ -544,7 +551,7 @@ class NanoORM
      *
      * @return mixed
      */
-    public function getId()
+    public function getId(): mixed
     {
         return $this->data[$this->primaryKey] ?? null;
     }

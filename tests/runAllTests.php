@@ -4,15 +4,14 @@ declare(strict_types=1);
 
 // Test runner entry point — executes all test files and reports a summary
 
-$testFiles = [
-    'NanoCoreRoutesTest.php',
-    'NanoCoreErrorHandlingTest.php',
-    'NanoCoreConfigTest.php',
-    'NanoCoreRouteEdgeCasesTest.php',
-    'NanoCoreUtilitiesTest.php',
-    'NanoORMTest.php',
-    'NanoORMEdgeCasesTest.php',
-];
+$testFiles = glob(__DIR__ . '/cases/*.php');
+
+if ($testFiles === false || empty($testFiles)) {
+    echo "No test files found in cases/\n";
+    exit(1);
+}
+
+sort($testFiles);
 
 $total = count($testFiles);
 $passed = 0;
@@ -24,14 +23,14 @@ echo "===================\n\n";
 
 foreach ($testFiles as $i => $file) {
     $num = $i + 1;
-    echo "[$num/$total] $file\n";
+    $display = basename($file);
+    echo "[$num/$total] $display\n";
 
-    $filePath = __DIR__ . '/' . $file;
     $output = '';
     $returnCode = 0;
 
     // Run each test in its own process and capture output + exit code
-    exec('php "' . $filePath . '" 2>&1', $outputLines, $returnCode);
+    exec('php "' . $file . '" 2>&1', $outputLines, $returnCode);
 
     if (!empty($outputLines)) {
         echo implode("\n", $outputLines) . "\n";
@@ -42,7 +41,7 @@ foreach ($testFiles as $i => $file) {
         echo "--- PASSED ---\n\n";
     } else {
         $failed++;
-        $failedFiles[] = $file;
+        $failedFiles[] = $display;
         echo "--- FAILED ---\n\n";
     }
 }

@@ -2,27 +2,10 @@
 
 declare(strict_types=1);
 
-require __DIR__ . '/../NanoCore.php';
+require __DIR__ . '/../../src/NanoCore.php';
+require_once __DIR__ . '/../TestHelpers.php';
 
 use NanoCore\NanoCore;
-
-function runRequest(NanoCore $app, string $method, string $path, array $query = []): mixed
-{
-    $_SERVER['REQUEST_METHOD'] = $method;
-    $queryString = http_build_query($query);
-    $_SERVER['REQUEST_URI'] = $path . ($queryString !== '' ? '?' . $queryString : '');
-    $_SERVER['QUERY_STRING'] = $queryString;
-    $_SERVER['SCRIPT_NAME'] = '/index.php';
-
-    return $app->run();
-}
-
-function assertEquals(mixed $expected, mixed $actual, string $message): void
-{
-    if ($expected !== $actual) {
-        throw new RuntimeException(sprintf("%s (expected %s, got %s)", $message, var_export($expected, true), var_export($actual, true)));
-    }
-}
 
 $tests = [];
 
@@ -123,17 +106,4 @@ $tests[] = function () {
     unlink($tmpFile);
 };
 
-$failed = 0;
-$messages = [];
-foreach ($tests as $index => $test) {
-    try {
-        $test();
-        $messages[] = "Test " . ($index + 1) . " passed.\n";
-    } catch (Throwable $exception) {
-        $failed++;
-        $messages[] = "Test " . ($index + 1) . " failed: " . $exception->getMessage() . "\n";
-    }
-}
-
-echo implode('', $messages);
-exit($failed > 0 ? 1 : 0);
+runTests($tests);

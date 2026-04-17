@@ -13,6 +13,24 @@ use ErrorException;
 
 class NanoCore
 {
+    private const PROTECTED_CONFIG_KEYS = ['PHP.INI', 'CORE'];
+
+    private const ALLOWED_INI_SETTINGS = [
+        'display_errors',
+        'error_log',
+        'error_reporting',
+        'log_errors',
+        'upload_max_filesize',
+        'post_max_size',
+        'max_execution_time',
+        'memory_limit',
+        'default_charset',
+        'date.timezone',
+        'session.cookie_httponly',
+        'session.cookie_secure',
+        'session.use_strict_mode',
+    ];
+
     private array $routes = [];
     private string $basePath;
     private ?string $configFile;
@@ -22,18 +40,46 @@ class NanoCore
     public function __construct(string $configFile = 'app.json')
     {
         $this->setErrorHandlers();
-        $this->configFile = $configFile;
+        $this->configFile = $this->validateConfigPath($configFile);
         $this->basePath = $this->getBasePath();
         $this->setPHPConfig();
-        $this->configSet('CORE.ROOT', $this->basePath);
+
+        // Set CORE.ROOT directly in cache — bypasses protected-key check
+        $this->loadConfig();
+        $this->configCache['CORE']['ROOT'] = $this->basePath;
     }
 
     private function setPHPConfig(): void
     {
         $iniSettings = $this->configGet('PHP.INI') ?? [];
         foreach ($iniSettings as $setting => $value) {
+            if (!in_array($setting, self::ALLOWED_INI_SETTINGS, true)) {
+                continue;
+            }
             ini_set($setting, $value);
         }
+    }
+
+    /**
+     * Validate and resolve the config file path within the project directory.
+     */
+    private function validateConfigPath(string $configFile): string
+    {
+        $dir = dirname($configFile);
+        $resolved = realpath($dir);
+
+        if ($resolved === false) {
+            $resolved = realpath('.');
+        }
+
+        $configFile = $resolved . DIRECTORY_SEPARATOR . basename($configFile);
+
+        // Only enforce .json extension for new files — existing files are accepted as-is
+        if (!file_exists($configFile) && !str_ends_with($configFile, '.json')) {
+            throw new \Exception("Config file must be a .json file");
+        }
+
+        return $configFile;
     }
     private function setErrorHandlers(): void
     {
@@ -42,8 +88,13 @@ class NanoCore
         });
 
         set_exception_handler(function ($exception): void {
+            $status = (int)$exception->getCode();
+            if ($status < 100 || $status > 599) {
+                $status = 500;
+            }
+
             header('Content-Type: application/json');
-            http_response_code(500);
+            http_response_code($status);
             echo json_encode(
                 [
                     'message' => $exception->getMessage(),
@@ -142,7 +193,7 @@ class NanoCore
      * @param string $path The path of the route.
      * @param mixed $handler The handler for the route.
      */
-    public function addRoute($method, $path, $handler): void
+    public function addRoute(string $method, string $path, callable $handler): void
     {
         $method = strtoupper((string)$method);
         $path = $this->removeBasePathPrefix($this->normalizeRoutePath((string)$path));
@@ -163,7 +214,7 @@ class NanoCore
      * @throws \Exception When an error occurs during the application execution.
      * @return mixed The response from the handler.
      */
-    public function run()
+    public function run(): mixed
     {
         try {
             $method = strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET'));
@@ -215,6 +266,7 @@ class NanoCore
                 'error' => $exception->getMessage(),
                 'code'  => $exception->getCode(),
             ]);
+            return null;
         }
     }
     ################
@@ -226,7 +278,7 @@ class NanoCore
      *
      * @return mixed The parsed configuration data as an associative array.
      */
-    private function loadConfig()
+    private function loadConfig(): array
     {
         if ($this->configCache !== null) {
             return $this->configCache;
@@ -237,21 +289,27 @@ class NanoCore
         }
 
         $contents = @file_get_contents($this->configFile);
-        $this->configCache = json_decode($contents ?? '{}', true);
+        $this->configCache = json_decode($contents ?: '{}', true) ?? [];
         return $this->configCache;
     }
 
     /**
-     * A method to save the configuration data to a file.
-     *
-     * @param mixed $data The data to be saved.
-     * @return void
+     * Atomically save configuration data to file.
      */
-    private function saveConfig($data): void
+    private function saveConfig(array $data): void
     {
-        $result = file_put_contents($this->configFile, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
-        if ($result !== false) {
+        $json = json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        $tmpFile = tempnam(dirname($this->configFile), 'nc_cfg_');
+        if ($tmpFile === false) {
+            throw new \Exception("Failed to create temporary config file");
+        }
+
+        $written = file_put_contents($tmpFile, $json);
+        if ($written !== false) {
+            rename($tmpFile, $this->configFile);
             $this->configCache = $data;
+        } else {
+            @unlink($tmpFile);
         }
     }
 
@@ -261,7 +319,7 @@ class NanoCore
      * @param string $key The key to retrieve the value for.
      * @return mixed The value associated with the key.
      */
-    public function configGet($name)
+    public function configGet(string $name): mixed
     {
         $data = $this->loadConfig();
 
@@ -277,10 +335,15 @@ class NanoCore
      *
      * @param string $prop The key to set the value for.
      * @param mixed $value The value to set for the key.
-     * @throws Exception When there is an error saving the configuration.
+     * @throws \Exception When trying to modify a protected key or saving fails.
      */
-    public function configSet(string $prop, $value): void
+    public function configSet(string $prop, mixed $value): void
     {
+        $topLevelKey = explode('.', $prop)[0];
+        if (in_array($topLevelKey, self::PROTECTED_CONFIG_KEYS, true)) {
+            throw new \Exception("Cannot modify protected config key: {$topLevelKey}");
+        }
+
         $config = $this->loadConfig();
 
         $path = explode('.', $prop);
@@ -298,6 +361,62 @@ class NanoCore
     }
 
     /**
+     * Validate that a URL uses an allowed scheme and does not point to a restricted network.
+     */
+    private static function validateUrl(string $url): void
+    {
+        $parsed = parse_url($url);
+
+        if ($parsed === false || !isset($parsed['scheme'])) {
+            throw new \Exception("Invalid URL");
+        }
+
+        $scheme = strtolower($parsed['scheme']);
+        if (!in_array($scheme, ['http', 'https'], true)) {
+            throw new \Exception("URL scheme not allowed: {$scheme}");
+        }
+
+        $host = $parsed['host'] ?? '';
+
+        // Block well-known internal hostnames
+        $blockedHosts = ['localhost', 'localhost.localdomain', 'ip6-localhost', 'ip6-loopback'];
+        if (in_array(strtolower($host), $blockedHosts, true)) {
+            throw new \Exception("URL points to a restricted network address");
+        }
+
+        // If the host is a direct IP, validate it
+        $ip = filter_var($host, FILTER_VALIDATE_IP);
+        if ($ip) {
+            self::validateIpNotRestricted($ip);
+            return;
+        }
+
+        // For hostnames, resolve DNS and check the resulting IPs
+        $resolvedIps = gethostbynamel($host);
+        if ($resolvedIps === false || empty($resolvedIps)) {
+            // Hostname doesn't resolve — let curl handle the error
+            return;
+        }
+
+        foreach ($resolvedIps as $resolvedIp) {
+            self::validateIpNotRestricted($resolvedIp);
+        }
+    }
+
+    /**
+     * Validate that an IP address is not in a private or restricted range.
+     */
+    private static function validateIpNotRestricted(string $ip): void
+    {
+        $flags = [FILTER_FLAG_NO_PRIV_RANGE, FILTER_FLAG_NO_RES_RANGE];
+        foreach ($flags as $flag) {
+            if (!filter_var($ip, FILTER_VALIDATE_IP, $flag)) {
+                throw new \Exception("URL points to a restricted network address");
+            }
+        }
+    }
+
+    /**
      * A function to make a cURL request to a specified URL with optional parameters and headers.
      *
      * @param string $url The URL to make the request to.
@@ -308,8 +427,10 @@ class NanoCore
      * @throws \Exception When an error occurs during the cURL request.
      * @return mixed The response from the cURL request, decoded as JSON if possible.
      */
-    public static function curlRequest(string $url, array $options = [])
+    public static function curlRequest(string $url, array $options = []): mixed
     {
+        self::validateUrl($url);
+
         $curlopt = [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_FOLLOWLOCATION => true,
@@ -331,7 +452,7 @@ class NanoCore
 
         if (!empty($options['params'])) {
             if ($options['method'] === 'GET') {
-                $url .= (strpos($url, '?') !== false ? '&' : '?') . http_build_query($options['params']);
+                $url .= (str_contains($url, '?') ? '&' : '?') . http_build_query($options['params']);
             } else {
                 $curlopt[CURLOPT_POSTFIELDS] = $options['params'];
             }
@@ -359,11 +480,8 @@ class NanoCore
             }
         }
 
-        $error = curl_error($ch);
-        curl_close($ch);
-
         if ($response === false) {
-            throw new \Exception("{\"endpoint\": \"$url\", \"error\": \"$error\"}");
+            throw new \Exception("External request failed");
         }
 
         // Decode JSON when valid, otherwise return raw response
@@ -374,10 +492,19 @@ class NanoCore
     /**
      * Retrieves the body content from the input stream and decodes it as JSON if possible.
      *
+     * @param int $maxBytes Maximum bytes to read from the request body.
+     * @param bool $validateContentType Whether to enforce application/json Content-Type.
      * @return mixed The decoded JSON content or the raw content if decoding fails.
      */
-    public function getBodyRequest(int $maxBytes = 10_485_760)
+    public function getBodyRequest(int $maxBytes = 10_485_760, bool $validateContentType = false): mixed
     {
+        if ($validateContentType) {
+            $contentType = $_SERVER['CONTENT_TYPE'] ?? $_SERVER['HTTP_CONTENT_TYPE'] ?? '';
+            if ($contentType !== '' && !str_contains(strtolower($contentType), 'application/json')) {
+                throw new \Exception("Content-Type must be application/json, got: {$contentType}");
+            }
+        }
+
         $content = file_get_contents('php://input', false, null, 0, $maxBytes + 1);
         if (strlen($content) > $maxBytes) {
             throw new \Exception("Request body exceeds maximum size of {$maxBytes} bytes");
@@ -391,13 +518,35 @@ class NanoCore
      *
      * @param string $filename The path to the HTML template file.
      * @param array $data An associative array containing data to replace in the template.
+     * @param bool $escape Whether to HTML-escape string values in $data. Defaults to true.
      * @return string The rendered HTML content.
      */
-    public function renderHtml(string $filename, array $data = []): string
+    public function renderHtml(string $filename, array $data = [], bool $escape = true): string
     {
-        $tpl = file_get_contents($filename);
+        // Resolve and validate the path
+        $realPath = realpath($filename);
 
-        return str_replace(array_keys($data), array_values($data), $tpl);
+        if ($realPath === false || !file_exists($realPath)) {
+            throw new \Exception("Template file not found: {$filename}");
+        }
+
+        // Ensure the template is within the project root
+        $rootPath = realpath($this->basePath ?: '.');
+        if ($rootPath === false || !str_starts_with($realPath, $rootPath)) {
+            throw new \Exception("Template file path is outside the allowed directory");
+        }
+
+        $tpl = file_get_contents($realPath);
+
+        if ($escape) {
+            $escapedData = array_map(function ($value) {
+                return is_string($value) ? htmlspecialchars($value, ENT_QUOTES, 'UTF-8') : $value;
+            }, $data);
+        } else {
+            $escapedData = $data;
+        }
+
+        return str_replace(array_keys($escapedData), array_values($escapedData), $tpl);
     }
 
     /**
@@ -406,7 +555,7 @@ class NanoCore
      * @param string $name The name of the property to retrieve.
      * @return mixed The value of the property or the result of the method execution.
      */
-    public function __get($name)
+    public function __get(string $name): mixed
     {
         switch ($name) {
             case 'body':
@@ -433,12 +582,20 @@ class NanoCore
     /**
      * Executes a command detaching from parent and logs the output to log file.
      *
-     * @param string $cmd The command to execute.
+     * @param string|array $cmd The command to execute. Pass an array for proper argument escaping,
+     *                          or a string for backward compatibility.
      * @return void
      */
-    public function execDetach(string $cmd): void
+    public function execDetach(string|array $cmd): void
     {
-        $cmd = escapeshellcmd($cmd);
+        if (is_array($cmd)) {
+            $program = escapeshellcmd(array_shift($cmd));
+            $escapedArgs = array_map('escapeshellarg', $cmd);
+            $cmd = $program . ' ' . implode(' ', $escapedArgs);
+        } else {
+            $cmd = escapeshellcmd($cmd);
+        }
+
         $basePath = rtrim($this->basePath, '/');
         $logPath = $basePath === '' ? 'nanocore.log' : $basePath . '/nanocore.log';
         $logFile = escapeshellarg($logPath);

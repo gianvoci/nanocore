@@ -2,36 +2,10 @@
 
 declare(strict_types=1);
 
-require __DIR__ . '/../NanoCore.php';
+require __DIR__ . '/../../src/NanoCore.php';
+require_once __DIR__ . '/../TestHelpers.php';
 
 use NanoCore\NanoCore;
-
-function assertEquals(mixed $expected, mixed $actual, string $message): void
-{
-    if ($expected !== $actual) {
-        throw new RuntimeException(sprintf(
-            "%s (expected %s, got %s)",
-            $message,
-            var_export($expected, true),
-            var_export($actual, true)
-        ));
-    }
-}
-
-function assertTrue(bool $condition, string $message): void
-{
-    if (!$condition) {
-        throw new RuntimeException($message);
-    }
-}
-
-// Helper: write content to a temp file and return its path
-function createTempHtml(string $content): string
-{
-    $path = tempnam(sys_get_temp_dir(), 'nc_html_');
-    file_put_contents($path, $content);
-    return $path;
-}
 
 $tests = [];
 
@@ -190,17 +164,4 @@ $tests[] = function () {
     unlink($tmpFile);
 };
 
-$failed = 0;
-$messages = [];
-foreach ($tests as $index => $test) {
-    try {
-        $test();
-        $messages[] = "Test " . ($index + 1) . " passed.\n";
-    } catch (Throwable $exception) {
-        $failed++;
-        $messages[] = "Test " . ($index + 1) . " failed: " . $exception->getMessage() . "\n";
-    }
-}
-
-echo implode('', $messages);
-exit($failed > 0 ? 1 : 0);
+runTests($tests);

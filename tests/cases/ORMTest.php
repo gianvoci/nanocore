@@ -2,37 +2,10 @@
 
 declare(strict_types=1);
 
-require __DIR__ . '/../NanoORM.php';
+require __DIR__ . '/../../src/NanoORM.php';
+require_once __DIR__ . '/../TestHelpers.php';
 
 use NanoCore\NanoORM;
-
-function createMemoryPDO(): PDO
-{
-    $pdo = new PDO('sqlite::memory:');
-    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-    return $pdo;
-}
-
-function prepareSchema(PDO $pdo): void
-{
-    $pdo->exec('CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, email TEXT, status TEXT)');
-    $pdo->exec('CREATE TABLE products (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, price REAL)');
-    $pdo->exec('CREATE TABLE orders (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, product_id INTEGER, status TEXT)');
-}
-
-function assertEquals(mixed $expected, mixed $actual, string $message): void
-{
-    if ($expected !== $actual) {
-        throw new RuntimeException(sprintf("%s (expected %s, got %s)", $message, var_export($expected, true), var_export($actual, true)));
-    }
-}
-
-function assertTrue(bool $condition, string $message): void
-{
-    if (!$condition) {
-        throw new RuntimeException($message);
-    }
-}
 
 $tests = [];
 
@@ -366,16 +339,4 @@ $tests[] = function () {
     assertTrue($user->nonexistent_field === null, 'Non-schema field should not be stored');
 };
 
-$failed = 0;
-foreach ($tests as $index => $test) {
-    try {
-        $test();
-        echo "Test " . ($index + 1) . " passed.\n";
-    } catch (Throwable $exception) {
-        $failed++;
-        echo "Test " . ($index + 1) . " failed: " . $exception->getMessage() . "\n";
-    }
-}
-
-$exitCode = $failed > 0 ? 1 : 0;
-exit($exitCode);
+runTests($tests);
