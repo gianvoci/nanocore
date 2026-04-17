@@ -1,11 +1,18 @@
 {
     "name": "gianvoci/nanocore",
-    "description": "NanoCore is a minimal PHP library for routing, global variables management, and utility functions.",
+    "description": "Lightweight PHP micro-framework with routing, config management, a micro ORM, and utility functions. Zero dependencies.",
     "type": "library",
-    "license": "GPL-3.0",
+    "license": "GPL-3.0-or-later",
+    "keywords": ["framework", "micro-framework", "routing", "orm", "config", "lightweight", "php"],
+    "homepage": "https://github.com/gianvoci/nanocore",
+    "support": {
+        "issues": "https://github.com/gianvoci/nanocore/issues",
+        "source": "https://github.com/gianvoci/nanocore",
+        "docs": "https://github.com/gianvoci/nanocore/tree/main/docs"
+    },
     "autoload": {
         "psr-4": {
-            "NanoCore\\": ""
+            "NanoCore\\": "src/"
         }
     },
     "authors": [
@@ -14,8 +21,10 @@
             "email": "softword@gvoci.com"
         }
     ],
-    "minimum-stability": "dev",
     "require": {
-        "php": ">=8.0"
+        "php": ">=8.5"
+    },
+    "archive": {
+        "exclude": ["/docs", "/tests", "nanocore.log", "app.json", "CLAUDE.md", ".gitignore"]
     }
 }

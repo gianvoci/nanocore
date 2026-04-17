@@ -1,0 +1,10 @@
+# Development files
+/docs               export-ignore
+/tests              export-ignore
+/CLAUDE.md          export-ignore
+app.json            export-ignore
+nanocore.log        export-ignore
+
+# IDE / Editor config
+.vscode             export-ignore
+.prettierrc         export-ignore

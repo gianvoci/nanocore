@@ -1,5 +1,9 @@
 config.json
 .vscode
-.prettierrc
 /vendor/
-nanocore.log
+*.log
+composer.lock
+
+# OS metadata
+.DS_Store
+Thumbs.db
