@@ -5,7 +5,7 @@ A lightweight PHP micro-framework with routing, config management, a micro ORM, 
 ## Features
 
 - Pattern-based routing with path parameters and wildcards
-- JSON config management with dot-notation access
+- Env-based config management with dot-notation access
 - NanoORM: lightweight ORM with CRUD, joins, schema auto-discovery
 - HTTP client with retry and SSRF protection
 - Request body parser with size limit
@@ -118,33 +118,64 @@ $app->addRoute('GET', '/users/@id', function ($app, $params) {
 
 ## Configuration
 
-Config is stored in `app.json` (auto-created as `{}` if missing). Access via dot-notation:
+Config is stored in `.env` (auto-created as empty if missing). Access via dot-notation:
 
 ```php
 // Read
 $dbHost = $app->configGet('DB.HOST');         // → "localhost"
-$dbPort = $app->configGet('DB.PORT');         // → 3306
-$fullDb = $app->configGet('DB');              // → ['HOST' => 'localhost', 'PORT' => 3306]
+$dbPort = $app->configGet('DB.PORT');         // → "3306"
+$fullDb = $app->configGet('DB');              // → ['HOST' => 'localhost', 'PORT' => '3306']
 
 // Write
 $app->configSet('DB.HOST', 'localhost');
-$app->configSet('DB.PORT', 3306);
+$app->configSet('DB.PORT', '3306');
 ```
+
+### .env Format
+
+```env
+# Database
+DB.HOST=localhost
+DB.PORT=3306
+DB.NAME=myapp
+
+# Quoted values (quotes are stripped)
+APP.TITLE="My Application"
+
+# Variable interpolation
+DB.URL=${DB.HOST}:${DB.PORT}
+
+# Inline comments
+APP.DEBUG=true # enabled for dev
+
+# export prefix is silently stripped
+export APP.ENV=production
+```
+
+All values are strings — `DB.PORT=3306` returns `"3306"`, not `3306`.
+
+### .env.local Override
+
+Create a `.env.local` file to override values from `.env` (useful for local development):
+
+```env
+# .env.local
+DB.HOST=127.0.0.1
+APP.DEBUG=true
+```
+
+### Config Template
+
+A `.env.example` file is included as a template with all available settings commented out. Copy it to `.env` and fill in your values.
 
 ### PHP.ini Settings
 
 Set PHP directives through config (only allowed directives are applied):
 
-```json
-{
-    "PHP": {
-        "INI": {
-            "display_errors": "1",
-            "error_reporting": "E_ALL",
-            "date.timezone": "Europe/Rome"
-        }
-    }
-}
+```env
+PHP.INI.display_errors=1
+PHP.INI.error_reporting=E_ALL
+PHP.INI.date.timezone=Europe/Rome
 ```
 
 Allowed directives: `display_errors`, `error_log`, `error_reporting`, `log_errors`, `upload_max_filesize`, `post_max_size`, `max_execution_time`, `memory_limit`, `default_charset`, `date.timezone`, `session.cookie_httponly`, `session.cookie_secure`, `session.use_strict_mode`.

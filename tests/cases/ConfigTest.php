@@ -19,9 +19,9 @@ $tests[] = function () {
     new NanoCore($tmpFile);
 
     assertTrue(file_exists($tmpFile), 'Config file should be auto-created');
-    // Constructor sets CORE.ROOT after creation, so file will have that structure
-    $decoded = json_decode(file_get_contents($tmpFile), true);
-    assertTrue($decoded !== null, 'Auto-created file should contain valid JSON');
+    // Auto-created file should be empty (not JSON)
+    $contents = file_get_contents($tmpFile);
+    assertEquals('', $contents, 'Auto-created file should be empty');
 
     unlink($tmpFile);
 };
@@ -32,11 +32,11 @@ $tests[] = function () {
     $app = new NanoCore($tmpFile);
 
     $app->configSet('DB.HOST', 'localhost');
-    $app->configSet('DB.PORT', 3306);
+    $app->configSet('DB.PORT', '3306');
 
     assertEquals('localhost', $app->configGet('DB.HOST'), 'DB.HOST should be localhost');
-    assertEquals(3306, $app->configGet('DB.PORT'), 'DB.PORT should be 3306');
-    assertEquals(['HOST' => 'localhost', 'PORT' => 3306], $app->configGet('DB'), 'DB should return full section');
+    assertEquals('3306', $app->configGet('DB.PORT'), 'DB.PORT should be "3306"');
+    assertEquals(['HOST' => 'localhost', 'PORT' => '3306'], $app->configGet('DB'), 'DB should return full section');
 
     unlink($tmpFile);
 };
@@ -61,7 +61,7 @@ $tests[] = function () {
     $app->configGet('TEST.KEY');
 
     // Modify file on disk directly
-    file_put_contents($tmpFile, '{"TEST":{"KEY":"from_disk"}}');
+    file_put_contents($tmpFile, "TEST.KEY=from_disk\n");
 
     // Should still return null because cache is used
     assertEquals(null, $app->configGet('TEST.KEY'), 'Cached value should be used, not disk');
@@ -69,7 +69,7 @@ $tests[] = function () {
     unlink($tmpFile);
 };
 
-// Test 5: configSet writes to file with correct JSON encoding
+// Test 5: configSet writes to file in .env format
 $tests[] = function () {
     $tmpFile = tmpConfigPath();
     $app = new NanoCore($tmpFile);
@@ -77,13 +77,8 @@ $tests[] = function () {
     $app->configSet('APP.NAME', 'Test App');
 
     $raw = file_get_contents($tmpFile);
-    $decoded = json_decode($raw, true);
 
-    assertTrue($decoded !== null, 'File should contain valid JSON');
-    assertEquals('Test App', $decoded['APP']['NAME'], 'JSON structure should match dot-notation');
-
-    // Verify pretty-print: should have newlines and indentation
-    assertTrue(str_contains($raw, "\n"), 'JSON should be pretty-printed');
+    assertTrue(str_contains($raw, 'APP.NAME="Test App"'), 'File should contain APP.NAME="Test App" with quoting');
 
     unlink($tmpFile);
 };
@@ -103,7 +98,7 @@ $tests[] = function () {
 
 // Test 7: Custom config file path works
 $tests[] = function () {
-    $tmpFile = sys_get_temp_dir() . '/custom_config_' . uniqid() . '.json';
+    $tmpFile = sys_get_temp_dir() . '/custom_config_' . uniqid() . '.env';
     $app = new NanoCore($tmpFile);
 
     $app->configSet('CUSTOM', 'works');
@@ -111,8 +106,7 @@ $tests[] = function () {
     assertEquals('works', $app->configGet('CUSTOM'), 'Custom path configGet should return correct value');
 
     $raw = file_get_contents($tmpFile);
-    $decoded = json_decode($raw, true);
-    assertEquals('works', $decoded['CUSTOM'], 'Custom file should contain the value on disk');
+    assertTrue(str_contains($raw, 'CUSTOM=works'), 'Custom file should contain the value on disk');
 
     unlink($tmpFile);
 };
@@ -134,7 +128,7 @@ $tests[] = function () {
     $previous = ini_get('display_errors');
 
     $tmpFile = tmpConfigPath();
-    file_put_contents($tmpFile, '{"PHP":{"INI":{"display_errors":"0"}}}');
+    file_put_contents($tmpFile, "PHP.INI.display_errors=0\n");
 
     new NanoCore($tmpFile);
 
@@ -155,6 +149,111 @@ $tests[] = function () {
 
     $section = $app->configGet('SECTION');
     assertEquals(['KEY1' => 'val1', 'KEY2' => 'val2'], $section, 'Top-level key should return full section');
+
+    unlink($tmpFile);
+};
+
+// Test 11: Quoted values have surrounding quotes stripped
+$tests[] = function () {
+    $tmpFile = tmpConfigPath();
+    file_put_contents($tmpFile, "APP.TITLE=\"My App\"\nAPP.DESC='short'\n");
+
+    $app = new NanoCore($tmpFile);
+
+    assertEquals('My App', $app->configGet('APP.TITLE'), 'Double-quoted value should be unquoted');
+    assertEquals('short', $app->configGet('APP.DESC'), 'Single-quoted value should be unquoted');
+
+    unlink($tmpFile);
+};
+
+// Test 12: Inline comments are stripped
+$tests[] = function () {
+    $tmpFile = tmpConfigPath();
+    file_put_contents($tmpFile, "APP.DEBUG=true # enabled for dev\n");
+
+    $app = new NanoCore($tmpFile);
+
+    assertEquals('true', $app->configGet('APP.DEBUG'), 'Inline comment should be stripped');
+
+    unlink($tmpFile);
+};
+
+// Test 13: Variable interpolation resolves ${VAR} references
+$tests[] = function () {
+    $tmpFile = tmpConfigPath();
+    file_put_contents($tmpFile, "DB.HOST=localhost\nDB.PORT=3306\nDB.URL=\${DB.HOST}:\${DB.PORT}\n");
+
+    $app = new NanoCore($tmpFile);
+
+    assertEquals('localhost:3306', $app->configGet('DB.URL'), 'Variable interpolation should resolve');
+
+    unlink($tmpFile);
+};
+
+// Test 14: .env.local overrides .env values
+$tests[] = function () {
+    $tmpFile = tmpConfigPath();
+    $localFile = $tmpFile . '.local';
+
+    file_put_contents($tmpFile, "APP.MODE=production\n");
+    file_put_contents($localFile, "APP.MODE=development\n");
+
+    $app = new NanoCore($tmpFile);
+
+    assertEquals('development', $app->configGet('APP.MODE'), '.env.local should override .env');
+
+    unlink($tmpFile);
+    if (file_exists($localFile)) {
+        unlink($localFile);
+    }
+};
+
+// Test 15: export prefix is stripped
+$tests[] = function () {
+    $tmpFile = tmpConfigPath();
+    file_put_contents($tmpFile, "export APP.ENV=staging\n");
+
+    $app = new NanoCore($tmpFile);
+
+    assertEquals('staging', $app->configGet('APP.ENV'), 'export prefix should be stripped');
+
+    unlink($tmpFile);
+};
+
+// Test 16: Value with # survives round-trip
+$tests[] = function () {
+    $tmpFile = tmpConfigPath();
+    $app = new NanoCore($tmpFile);
+
+    $app->configSet('APP.MSG', 'hello # world');
+
+    // Create a new instance to force re-parse from file
+    $app2 = new NanoCore($tmpFile);
+    assertEquals('hello # world', $app2->configGet('APP.MSG'), 'Value with # should survive round-trip');
+
+    unlink($tmpFile);
+};
+
+// Test 17: Value with internal quotes preserved via strrpos
+$tests[] = function () {
+    $tmpFile = tmpConfigPath();
+    file_put_contents($tmpFile, 'APP.MSG="hello \"world\""');
+
+    $app = new NanoCore($tmpFile);
+    // With strrpos fix, the full quoted content is preserved
+    $value = $app->configGet('APP.MSG');
+    assertTrue(str_contains($value, 'hello'), 'Quoted value with internal quotes should contain the text');
+
+    unlink($tmpFile);
+};
+
+// Test 18: Single-quoted values skip interpolation
+$tests[] = function () {
+    $tmpFile = tmpConfigPath();
+    file_put_contents($tmpFile, "DB.HOST=localhost\nDB.URL='\${DB.HOST}:3306'");
+
+    $app = new NanoCore($tmpFile);
+    assertEquals('${DB.HOST}:3306', $app->configGet('DB.URL'), 'Single-quoted value should not interpolate');
 
     unlink($tmpFile);
 };

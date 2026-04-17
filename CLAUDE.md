@@ -7,7 +7,7 @@ Lightweight PHP library providing routing, configuration management, a micro ORM
 - **Language**: PHP >=8.5
 - **Namespace**: `NanoCore` (PSR-4, maps to `src/`)
 - **Entry points**: Consumers instantiate `NanoCore\NanoCore` and call `addRoute()` + `run()`
-- **Config**: `app.json` at project root, dot-notation access (`CORE.ROOT`, `PHP.INI`, etc.)
+- **Config**: `.env` at project root, dot-notation access (`CORE.ROOT`, `PHP.INI`, etc.), `.env.local` overrides
 - **No framework dependencies** — standalone, only requires PHP 8.5+
 
 ## Self-Maintenance Rules
@@ -25,5 +25,5 @@ Lightweight PHP library providing routing, configuration management, a micro ORM
 | docs/conventions-database.md | NanoORM usage, schema discovery, query patterns |
 | docs/rules/error-handling.md | Exception and error handler patterns |
 | docs/rules/route-registration.md | Route pattern syntax and dispatch behavior |
-| docs/rules/config-management.md | Config get/set patterns and app.json structure |
+| docs/rules/config-management.md | Config get/set patterns and .env structure |
 | docs/rules/orm-usage.md | CRUD, hydration, joins, and magic property patterns |

@@ -25,6 +25,6 @@
         "php": ">=8.5"
     },
     "archive": {
-        "exclude": ["/docs", "/tests", "nanocore.log", "app.json", "CLAUDE.md", ".gitignore"]
+        "exclude": ["/docs", "/tests", "nanocore.log", ".env", "app.json", "CLAUDE.md", ".gitignore"]
     }
 }

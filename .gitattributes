@@ -2,6 +2,7 @@
 /docs               export-ignore
 /tests              export-ignore
 /CLAUDE.md          export-ignore
+.env                export-ignore
 app.json            export-ignore
 nanocore.log        export-ignore
 

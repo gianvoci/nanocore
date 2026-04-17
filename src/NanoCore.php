@@ -34,13 +34,15 @@ class NanoCore
     private array $routes = [];
     private string $basePath;
     private ?string $configFile;
+    private ?string $localConfigFile = null;
     private ?array $configCache = null;
     private array $storage = [];
 
-    public function __construct(string $configFile = 'app.json')
+    public function __construct(string $configFile = '.env')
     {
         $this->setErrorHandlers();
         $this->configFile = $this->validateConfigPath($configFile);
+        $this->localConfigFile = dirname($this->configFile) . '/' . basename($this->configFile) . '.local';
         $this->basePath = $this->getBasePath();
         $this->setPHPConfig();
 
@@ -74,9 +76,9 @@ class NanoCore
 
         $configFile = $resolved . DIRECTORY_SEPARATOR . basename($configFile);
 
-        // Only enforce .json extension for new files — existing files are accepted as-is
-        if (!file_exists($configFile) && !str_ends_with($configFile, '.json')) {
-            throw new \Exception("Config file must be a .json file");
+        // Only enforce .env extension for new files — existing files are accepted as-is
+        if (!file_exists($configFile) && !str_ends_with($configFile, '.env')) {
+            throw new \Exception("Config file must be a .env file");
         }
 
         return $configFile;
@@ -274,9 +276,8 @@ class NanoCore
     ################
 
     /**
-     * A method to load and parse the configuration data from a file.
-     *
-     * @return mixed The parsed configuration data as an associative array.
+     * Load config from .env file, with optional .env.local override.
+     * Returns the merged config array and caches it in memory.
      */
     private function loadConfig(): array
     {
@@ -285,32 +286,212 @@ class NanoCore
         }
 
         if (!file_exists($this->configFile)) {
-            file_put_contents($this->configFile, '{}');
+            file_put_contents($this->configFile, '');
         }
 
-        $contents = @file_get_contents($this->configFile);
-        $this->configCache = json_decode($contents ?: '{}', true) ?? [];
+        $config = [];
+        $this->parseEnvFile($this->configFile, $config);
+
+        // .env.local overrides .env values
+        if (file_exists($this->localConfigFile)) {
+            $this->parseEnvFile($this->localConfigFile, $config);
+        }
+
+        $this->configCache = $config;
         return $this->configCache;
     }
 
     /**
-     * Atomically save configuration data to file.
+     * Parse a .env file and populate/override config values.
+     * Each line: KEY=value, with dot-notation for nested keys.
+     * Supports comments, quoted values, inline comments, export prefix, and ${VAR} interpolation.
+     */
+    private function parseEnvFile(string $path, array &$config): void
+    {
+        $contents = @file_get_contents($path);
+        if ($contents === false || $contents === '') {
+            return;
+        }
+
+        $lines = explode("\n", $contents);
+
+        foreach ($lines as $line) {
+            $line = trim($line);
+
+            // Skip empty lines and comments
+            if ($line === '' || str_starts_with($line, '#')) {
+                continue;
+            }
+
+            // Strip 'export ' prefix
+            if (str_starts_with($line, 'export ')) {
+                $line = substr($line, 7);
+            }
+
+            // Split on first '=' only
+            $parts = explode('=', $line, 2);
+            if (count($parts) !== 2) {
+                continue;
+            }
+
+            $key = trim($parts[0]);
+            $value = trim($parts[1]);
+
+            // Strip inline comments (but not inside quotes)
+            $value = $this->stripInlineComment($value);
+
+            // Track whether the value was single-quoted (no interpolation)
+            $isSingleQuoted = str_starts_with($value, "'") && str_ends_with($value, "'");
+
+            // Strip surrounding quotes
+            if (str_starts_with($value, '"') && str_ends_with($value, '"')) {
+                $value = substr($value, 1, -1);
+            } elseif ($isSingleQuoted) {
+                $value = substr($value, 1, -1);
+            }
+
+            // Variable interpolation: replace ${VAR} with already-resolved values
+            // Single-quoted values are literal — skip interpolation
+            if (!$isSingleQuoted) {
+                $value = preg_replace_callback(
+                    '/\$\{([^}]+)\}/',
+                    function (array $matches) use ($config): string {
+                        $resolved = $this->resolveDotKey($config, $matches[1]);
+                        return $resolved ?? $matches[0];
+                    },
+                    $value
+                );
+            }
+
+            // Rebuild nested array from dot-notation key
+            $this->setNestedValue($config, $key, $value);
+        }
+    }
+
+    /**
+     * Strip inline comments from a value, respecting quoted strings.
+     */
+    private function stripInlineComment(string $value): string
+    {
+        // If the value starts with a quote, find the LAST matching quote
+        // (not the first — values may contain internal quotes)
+        if (str_starts_with($value, '"')) {
+            $end = strrpos($value, '"');
+            if ($end !== false && $end > 0) {
+                return substr($value, 0, $end + 1);
+            }
+            return $value;
+        }
+        if (str_starts_with($value, "'")) {
+            $end = strrpos($value, "'");
+            if ($end !== false && $end > 0) {
+                return substr($value, 0, $end + 1);
+            }
+            return $value;
+        }
+
+        // Unquoted: split on ' #' and take the first part
+        $commentPos = strpos($value, ' #');
+        if ($commentPos !== false) {
+            $value = substr($value, 0, $commentPos);
+        }
+
+        return trim($value);
+    }
+
+    /**
+     * Resolve a dot-notation key against a nested array.
+     */
+    private function resolveDotKey(array $config, string $key): ?string
+    {
+        $parts = explode('.', $key);
+        $current = $config;
+        foreach ($parts as $part) {
+            if (!is_array($current) || !array_key_exists($part, $current)) {
+                return null;
+            }
+            $current = $current[$part];
+        }
+        return is_string($current) ? $current : null;
+    }
+
+    /**
+     * Set a value at a dot-notation key path, creating nested arrays as needed.
+     */
+    private function setNestedValue(array &$config, string $key, mixed $value): void
+    {
+        $parts = explode('.', $key);
+        $current = &$config;
+        foreach ($parts as $i => $part) {
+            if ($i === count($parts) - 1) {
+                $current[$part] = $value;
+            } else {
+                if (!isset($current[$part]) || !is_array($current[$part])) {
+                    $current[$part] = [];
+                }
+                $current = &$current[$part];
+            }
+        }
+    }
+
+    /**
+     * Atomically save configuration data to .env file.
+     * Flattens nested arrays to dot-notation keys.
      */
     private function saveConfig(array $data): void
     {
-        $json = json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        $flat = $this->flattenConfigArray($data);
+        ksort($flat);
+
+        $lines = [];
+        foreach ($flat as $key => $value) {
+            // Skip non-string leaf values (arrays that can't be represented in .env)
+            if (is_array($value)) {
+                continue;
+            }
+
+            $value = (string)$value;
+
+            // Quote values containing special characters (#, spaces, ${, quotes)
+            // so they survive round-trip through parseEnvFile
+            if (preg_match('/[#\s\${}]/', $value) || str_contains($value, '"') || str_contains($value, "'")) {
+                $value = '"' . $value . '"';
+            }
+
+            $lines[] = $key . '=' . $value;
+        }
+
+        $content = implode("\n", $lines) . "\n";
+
         $tmpFile = tempnam(dirname($this->configFile), 'nc_cfg_');
         if ($tmpFile === false) {
             throw new \Exception("Failed to create temporary config file");
         }
 
-        $written = file_put_contents($tmpFile, $json);
+        $written = file_put_contents($tmpFile, $content);
         if ($written !== false) {
             rename($tmpFile, $this->configFile);
             $this->configCache = $data;
         } else {
             @unlink($tmpFile);
         }
+    }
+
+    /**
+     * Flatten a nested config array to dot-notation key-value pairs.
+     */
+    private function flattenConfigArray(array $data, string $prefix = ''): array
+    {
+        $result = [];
+        foreach ($data as $key => $value) {
+            $fullKey = $prefix . $key;
+            if (is_array($value)) {
+                $result = array_merge($result, $this->flattenConfigArray($value, $fullKey . '.'));
+            } else {
+                $result[$fullKey] = $value ?? '';
+            }
+        }
+        return $result;
     }
 
     /**
