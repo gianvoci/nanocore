@@ -1,0 +1,107 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
+
+## [Unreleased]
+
+## [0.5.0] - 2026-04-18
+
+### Changed
+
+- Improved inline comments and documentation to reflect recent code quality improvements
+
+### Fixed
+
+- Added type hints to `__set` magic method and other methods across NanoCore and NanoORM
+- Added `JSON_THROW_ON_ERROR` flag to all `json_encode` calls for proper error handling
+- Added output buffer safety guard (`ob_flush`) before `ob_end_clean()`
+- Backtick-quoted field names in NanoORM `INSERT`/`UPDATE` statements to avoid reserved word conflicts
+- Updated error tests to use `try`/`finally` for reliable handler cleanup
+
+## [0.4.0] - 2026-04-17
+
+### Added
+
+- `.env` configuration format with `.env.local` override support, quoted values, inline comments, variable interpolation (`${VAR}`), and `export` prefix stripping
+- `.env.example` file with documented configuration keys
+- README with comprehensive usage documentation
+- LICENSE file (GPL-3.0-or-later)
+- `.gitattributes` for Packagist distribution
+- Pre-commit hook infrastructure and test runner improvements (later removed in cleanup)
+
+### Changed
+
+- Switched config system from `app.json` to `.env` format
+- Moved all source files to `src/` directory with PSR-4 autoloading
+- Restructured test suite into `tests/cases/` with shared `TestHelpers.php`
+- Renamed test files to consistent naming convention
+- Updated all documentation for PHP 8.5 compatibility and `src/` structure
+- Added PHP 8.5 compatibility: removed deprecated `curl_close()`/`curl_error()`, replaced `strpos` with `str_contains`, added type declarations to 13 methods
+- Refactored NanoCore.php and NanoORM.php for lower cognitive load (extracted helpers, reordered methods, removed dead code)
+- Consolidated duplicated test helper functions into shared `TestHelpers.php`
+
+### Removed
+
+- Removed `app.json` configuration file
+- Removed version bump scripts and pre-commit hook infrastructure
+
+## [0.3.0] - 2026-04-16
+
+### Added
+
+- Comprehensive test suite covering routing, ORM, config, error handling, utilities, and edge cases
+- Documentation structure with 9 files covering file structure, commands, conventions, and rules
+- Config caching to avoid repeated disk I/O on every `configGet()` call
+- SQL injection validation for table names, field names, and `ORDER BY` clauses
+
+### Changed
+
+- `findById()` now clones before hydrating to prevent mutation of the original instance
+- `update()` and `delete()` use dynamic `primaryKey` for bound parameters instead of hardcoded `:id`
+- Added retry with exponential backoff in `curlRequest()`
+- Exception handler no longer leaks file paths and line numbers
+
+### Fixed
+
+- Prevented SQL injection in `findAll()` `ORDER BY` parameter via `sanitizeOrderBy()`
+- Fixed variable shadowing in `configSet()` method
+- Fixed `json_decode` ambiguity by adding `true` flag and `json_last_error()` check
+- Added 10MB size limit to `getBodyRequest()` to prevent memory exhaustion
+
+### Security
+
+- SSRF protection in `curlRequest()` with URL validation blocking private/restricted IPs
+- Path traversal prevention in `renderHtml()` with path validation
+- Command injection prevention in `execDetach()` via array-based argument escaping
+- XSS prevention in HTML rendering with auto-escaping
+- `configSet()` protected keys and atomic file writes
+- `setPHPConfig()` allowlist for `ini_set` calls
+- DNS rebinding bypass protection in SSRF validation
+
+## [0.2.0] - 2026-02-11
+
+### Added
+
+- NanoORM lightweight ORM class with CRUD operations, JOIN support, and magic property accessors (`__get`, `__set`, `__isset`, `__unset`)
+- ORM documentation with capabilities and usage examples
+
+### Changed
+
+- Standardized NanoCore helper method naming conventions
+- Switched Composer autoload to PSR-4 namespace mapping
+
+## [0.1.0] - 2025-12-07
+
+### Changed
+
+- Routing fixes
+- Small refactor for PHP 8.4 compatibility
+
+## [*initial development*] - 2024-05-24
+
+### Added
+
+- Core NanoCore library with routing, configuration, HTTP client (`CurlRequest`), local storage manager, and `ExecDetach` for background processes
+- Initial README
