@@ -15,6 +15,7 @@
 - A global exception handler emits JSON: `{message, code}` with HTTP status from the exception code (clamped to 100–599, defaults to 500). File and line are intentionally excluded for security.
 - `run()` catches exceptions and emits JSON: `{error, code}` with the exception code as HTTP status. Falls back to 500 if code is outside 100–599.
 - Controllers using this library should throw exceptions with HTTP codes: `throw new \Exception('Not found', 404)`.
+- All JSON encoding uses `JSON_THROW_ON_ERROR` to prevent silent encoding failures.
 
 ## Config System
 
@@ -39,7 +40,7 @@
 - `curlRequest` retries up to 5 times with linear backoff (100ms, 200ms, 300ms...) and resets the curl handle between attempts. On failure, throws a generic "External request failed" exception (no internal details leaked).
 - Magic properties via `__get`/`__set` on NanoCore instance: `$app->body` reads request body via `getBodyRequest()` with a 10MB default size limit (throws on overflow). The limit is customizable only via direct `getBodyRequest($maxBytes)` calls. An optional `$validateContentType` parameter (defaults to `false`) can enforce `application/json` Content-Type.
 - `renderHtml` loads a template file and does string replacement from a data array. The path is validated to prevent traversal outside the project root. String values in `$data` are HTML-escaped by default (`$escape = true`); pass `false` to opt out.
-- `execDetach` runs a shell command in the background, logging output to `nanocore.log`. Accepts a string (backward compat) or an array of `[command, arg, arg, ...]` for proper argument escaping.
+- `execDetach` runs a shell command in the background, logging output to `nanocore.log`. Accepts a string (backward compat) or an array of `[command, arg, arg, ...]` for proper argument escaping. `ob_flush()` is guarded — skips when no output buffer is active, preventing warnings.
 
 ## Security
 

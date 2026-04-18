@@ -277,7 +277,7 @@ Join types: `INNER`, `LEFT`, `RIGHT`, `FULL`, `CROSS`.
 | `addJoin($table, $local, $foreign, $type, $fields)` | `self` | Register a JOIN |
 | `fetchWithJoins($conds)` | `array` | Execute query with registered JOINs |
 | `toArray()` | `array` | Get all field data |
-| `clear()` | `self` | Reset to fresh state |
+| `clear()` | `self` | Reset data, joins, and isNew state (preserves schema) |
 | `getId()` | `mixed` | Get primary key value |
 | `isNew()` | `bool` | Check if record is unsaved |
 | `getTable()` | `string` | Get table name |
@@ -346,6 +346,7 @@ $app->execDetach(['php', 'process.php', '--user', $userId, '--action', 'notify']
 ```
 
 Output is logged to `nanocore.log` in the project root.
+Output buffering is flushed safely — no errors if no buffer is active.
 
 ## Magic Properties
 
@@ -364,7 +365,7 @@ NanoCore has security protections built in:
 | Protection | Where | Description |
 | --- | --- | --- |
 | **SSRF Prevention** | `curlRequest` | Only http/https URLs. Blocks private IPs, localhost, and restricted ranges. DNS resolution is checked. |
-| **SQL Injection** | NanoORM | All identifiers validated. PDO prepared statements for all values. |
+| **SQL Injection** | NanoORM | All identifiers validated. Field names backtick-quoted in queries. PDO prepared statements for all values. |
 | **XSS Prevention** | `renderHtml` | HTML-escaping enabled by default. Path traversal blocked. |
 | **Config Tampering** | `configSet` | Protected keys (`PHP.INI`, `CORE`) cannot be modified. Atomic file writes. |
 | **Command Injection** | `execDetach` | Array mode escapes each argument independently. |
@@ -378,6 +379,7 @@ NanoCore registers custom handlers on construction:
 - All PHP errors are converted to `ErrorException`
 - Uncaught exceptions return JSON with appropriate HTTP status
 - No internal paths leaked in responses
+- All JSON responses use `JSON_THROW_ON_ERROR` to prevent silent encoding failures
 
 In route handlers, throw exceptions with HTTP codes:
 

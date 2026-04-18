@@ -31,6 +31,8 @@ Only discovered fields (and the primary key) are accepted by `__set`. Unknown fi
 | Delete | `$orm->delete()` | Requires primary key to be set |
 | Batch delete | `$orm->deleteWhere(['status' => 'inactive'])` | Returns affected row count |
 
+Field names in INSERT and UPDATE queries are backtick-quoted (`` `field` ``) as defense in depth — this prevents issues with SQL reserved words used as column names.
+
 ## Hydration and Cloning
 
 - `findById`, `findBy`, and `findAll` all use `(clone $this)->hydrate($row)` — each result is an independent instance.
