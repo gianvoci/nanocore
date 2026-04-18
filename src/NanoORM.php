@@ -63,6 +63,7 @@ class NanoORM
     protected function loadTableSchema(): void
     {
         try {
+            // Table name validated in constructor via validateIdentifier()
             $stmt = $this->pdo->query("DESCRIBE {$this->table}");
             $columns = $stmt->fetchAll(\PDO::FETCH_ASSOC);
             foreach ($columns as $column) {
@@ -71,7 +72,8 @@ class NanoORM
         } catch (\Exception $e) {
             // Fallback for SQLite or other databases
             try {
-                $stmt = $this->pdo->query("PRAGMA table_info({$this->table})");
+            // Table name validated in constructor via validateIdentifier()
+            $stmt = $this->pdo->query("PRAGMA table_info({$this->table})");
                 $columns = $stmt->fetchAll(\PDO::FETCH_ASSOC);
                 foreach ($columns as $column) {
                     $this->fields[] = $column['name'];
@@ -185,6 +187,7 @@ class NanoORM
 
         $sql = "SELECT * FROM {$this->table} WHERE {$field} = :value";
         if ($limit !== null) {
+            // $limit is int type-hinted, safe to interpolate
             $sql .= " LIMIT {$limit}";
         }
 
@@ -231,6 +234,7 @@ class NanoORM
         }
 
         if ($limit !== null) {
+            // $limit is int type-hinted, safe to interpolate
             $sql .= " LIMIT {$limit}";
         }
 
@@ -379,11 +383,12 @@ class NanoORM
         }
 
         $fields = array_keys($data);
+        $quotedFields = array_map(fn($f) => "`{$f}`", $fields);
         $placeholders = array_map(function ($field) {
             return ":{$field}";
         }, $fields);
 
-        $sql = "INSERT INTO {$this->table} (" . implode(', ', $fields) . ") VALUES (" . implode(', ', $placeholders) . ")";
+        $sql = "INSERT INTO {$this->table} (" . implode(', ', $quotedFields) . ") VALUES (" . implode(', ', $placeholders) . ")";
 
         $stmt = $this->pdo->prepare($sql);
         $result = $stmt->execute($data);
@@ -412,7 +417,7 @@ class NanoORM
         unset($data[$this->primaryKey]);
 
         $sets = array_map(function ($field) {
-            return "{$field} = :{$field}";
+            return "`{$field}` = :{$field}";
         }, array_keys($data));
 
         $sql = "UPDATE {$this->table} SET " . implode(', ', $sets) . " WHERE {$this->primaryKey} = :{$this->primaryKey}";
@@ -577,9 +582,8 @@ class NanoORM
     }
 
     /**
-     * Clear all data and reset to new state
-     *
-     * @return self
+     * Resets entity data, isNew state, and registered joins.
+     * Table schema is preserved.
      */
     public function clear(): self
     {
