@@ -101,7 +101,8 @@ class NanoCore
                 [
                     'message' => $exception->getMessage(),
                     'code'    => $exception->getCode(),
-                ]
+                ],
+                JSON_THROW_ON_ERROR
             );
         });
     }
@@ -267,7 +268,7 @@ class NanoCore
             echo json_encode([
                 'error' => $exception->getMessage(),
                 'code'  => $exception->getCode(),
-            ]);
+            ], JSON_THROW_ON_ERROR);
             return null;
         }
     }
@@ -337,7 +338,7 @@ class NanoCore
             $key = trim($parts[0]);
             $value = trim($parts[1]);
 
-            // Strip inline comments (but not inside quotes)
+            // Strip inline # comments, respecting quoted strings
             $value = $this->stripInlineComment($value);
 
             // Track whether the value was single-quoted (no interpolation)
@@ -712,6 +713,7 @@ class NanoCore
         }
 
         // Ensure the template is within the project root
+        // CLI mode: basePath is empty, use current working directory as root
         $rootPath = realpath($this->basePath ?: '.');
         if ($rootPath === false || !str_starts_with($realPath, $rootPath)) {
             throw new \Exception("Template file path is outside the allowed directory");
@@ -755,7 +757,7 @@ class NanoCore
      * @param mixed $value The value to set for the property.
      * @return void
      */
-    public function __set($name, $value): void
+    public function __set(string $name, mixed $value): void
     {
         $this->storage[$name] = $value;
     }
@@ -781,7 +783,9 @@ class NanoCore
         $logPath = $basePath === '' ? 'nanocore.log' : $basePath . '/nanocore.log';
         $logFile = escapeshellarg($logPath);
         shell_exec("{$cmd} >>/dev/null 2>&1 >> {$logFile} &");
+        if (ob_get_level() > 0) {
+            ob_flush();
+        }
         flush();
-        ob_flush();
     }
 }
