@@ -2,7 +2,6 @@
 
 declare(strict_types=1);
 
-require __DIR__ . '/../../src/NanoCore.php';
 require_once __DIR__ . '/../TestHelpers.php';
 
 use NanoCore\NanoCore;
@@ -11,8 +10,7 @@ $tests = [];
 
 // Test 1: getBodyRequest in CLI returns empty string (php://input is empty)
 $tests[] = function () {
-    $tmpFile = tempnam(sys_get_temp_dir(), 'nc_test_');
-    $app = new NanoCore($tmpFile);
+    [$app, $tmpFile] = createNanoCoreApp();
 
     $result = $app->getBodyRequest();
     assertEquals('', $result, 'getBodyRequest in CLI should return empty string');
@@ -22,8 +20,7 @@ $tests[] = function () {
 
 // Test 2: getBodyRequest with custom maxBytes doesn't crash in CLI
 $tests[] = function () {
-    $tmpFile = tempnam(sys_get_temp_dir(), 'nc_test_');
-    $app = new NanoCore($tmpFile);
+    [$app, $tmpFile] = createNanoCoreApp();
 
     // Default limit
     $result1 = $app->getBodyRequest();
@@ -38,8 +35,7 @@ $tests[] = function () {
 
 // Test 3: Magic __get for 'body' returns getBodyRequest result
 $tests[] = function () {
-    $tmpFile = tempnam(sys_get_temp_dir(), 'nc_test_');
-    $app = new NanoCore($tmpFile);
+    [$app, $tmpFile] = createNanoCoreApp();
 
     $body = $app->body;
     assertEquals('', $body, 'Magic property body should return empty string in CLI');
@@ -49,8 +45,7 @@ $tests[] = function () {
 
 // Test 4: Magic __get for 'cli' returns true in CLI mode
 $tests[] = function () {
-    $tmpFile = tempnam(sys_get_temp_dir(), 'nc_test_');
-    $app = new NanoCore($tmpFile);
+    [$app, $tmpFile] = createNanoCoreApp();
 
     assertTrue($app->cli, 'Magic property cli should be true when running from CLI');
 
@@ -59,8 +54,7 @@ $tests[] = function () {
 
 // Test 5: Magic __get for unknown property returns null
 $tests[] = function () {
-    $tmpFile = tempnam(sys_get_temp_dir(), 'nc_test_');
-    $app = new NanoCore($tmpFile);
+    [$app, $tmpFile] = createNanoCoreApp();
 
     assertEquals(null, $app->nonexistent, 'Unknown magic property should return null');
 
@@ -69,8 +63,7 @@ $tests[] = function () {
 
 // Test 6: Magic __set and __get for custom storage
 $tests[] = function () {
-    $tmpFile = tempnam(sys_get_temp_dir(), 'nc_test_');
-    $app = new NanoCore($tmpFile);
+    [$app, $tmpFile] = createNanoCoreApp();
 
     $app->myKey = 'myValue';
     assertEquals('myValue', $app->myKey, 'Stored string should be retrievable');
@@ -83,8 +76,7 @@ $tests[] = function () {
 
 // Test 7: renderHtml replaces placeholders
 $tests[] = function () {
-    $tmpFile = tempnam(sys_get_temp_dir(), 'nc_test_');
-    $app = new NanoCore($tmpFile);
+    [$app, $tmpFile] = createNanoCoreApp();
 
     $htmlPath = createTempHtml('<h1>{{title}}</h1><p>{{body}}</p>');
 
@@ -97,8 +89,7 @@ $tests[] = function () {
 
 // Test 8: renderHtml with no data returns template unchanged
 $tests[] = function () {
-    $tmpFile = tempnam(sys_get_temp_dir(), 'nc_test_');
-    $app = new NanoCore($tmpFile);
+    [$app, $tmpFile] = createNanoCoreApp();
 
     $htmlPath = createTempHtml('<h1>{{title}}</h1>');
 
@@ -111,8 +102,7 @@ $tests[] = function () {
 
 // Test 9: renderHtml with empty template
 $tests[] = function () {
-    $tmpFile = tempnam(sys_get_temp_dir(), 'nc_test_');
-    $app = new NanoCore($tmpFile);
+    [$app, $tmpFile] = createNanoCoreApp();
 
     $htmlPath = createTempHtml('');
 
@@ -125,8 +115,7 @@ $tests[] = function () {
 
 // Test 10: getBodyRequest does not throw with zero-byte input and zero maxBytes
 $tests[] = function () {
-    $tmpFile = tempnam(sys_get_temp_dir(), 'nc_test_');
-    $app = new NanoCore($tmpFile);
+    [$app, $tmpFile] = createNanoCoreApp();
 
     // maxBytes=0: strlen('') is 0, which is NOT > 0, so no exception
     $result = $app->getBodyRequest(0);
@@ -137,8 +126,7 @@ $tests[] = function () {
 
 // Test 11: renderHtml replaces multiple occurrences of the same placeholder
 $tests[] = function () {
-    $tmpFile = tempnam(sys_get_temp_dir(), 'nc_test_');
-    $app = new NanoCore($tmpFile);
+    [$app, $tmpFile] = createNanoCoreApp();
 
     $htmlPath = createTempHtml('<p>{{name}}</p><span>{{name}}</span>');
 
@@ -151,8 +139,7 @@ $tests[] = function () {
 
 // Test 12: execDetach does not crash (basic smoke test)
 $tests[] = function () {
-    $tmpFile = tempnam(sys_get_temp_dir(), 'nc_test_');
-    $app = new NanoCore($tmpFile);
+    [$app, $tmpFile] = createNanoCoreApp();
 
     // execDetach calls ob_flush(), so we need an active output buffer
     ob_start();
@@ -160,6 +147,64 @@ $tests[] = function () {
     // Use a harmless command that exits immediately
     $app->execDetach('echo test');
 
+    ob_end_clean();
+    unlink($tmpFile);
+};
+
+// Test 13: renderHtml escapes HTML by default (XSS prevention)
+$tests[] = function () {
+    [$app, $tmpFile] = createNanoCoreApp();
+    
+    $htmlPath = createTempHtml('<p>{{content}}</p>');
+
+    $result = $app->renderHtml($htmlPath, ['{{content}}' => '<script>alert("xss")</script>']);
+    assertTrue(strpos($result, '&lt;script&gt;') !== false, 'renderHtml should HTML-escape content by default');
+    
+    unlink($htmlPath);
+    unlink($tmpFile);
+};
+
+// Test 14: renderHtml with escape=false does NOT escape
+$tests[] = function () {
+    [$app, $tmpFile] = createNanoCoreApp();
+    
+    $htmlPath = createTempHtml('<p>{{content}}</p>');
+
+    $result = $app->renderHtml($htmlPath, ['{{content}}' => '<b>bold</b>'], false);
+    assertTrue(strpos($result, '<b>bold</b>') !== false, 'renderHtml with escape=false should not escape HTML content');
+    
+    unlink($htmlPath);
+    unlink($tmpFile);
+};
+
+// Test 15: getBodyRequest throws on wrong Content-Type when validateContentType=true
+$tests[] = function () {
+    [$app, $tmpFile] = createNanoCoreApp();
+    
+    $_SERVER['CONTENT_TYPE'] = 'text/plain';
+    
+    assertThrows(
+        \Exception::class,
+        'Content-Type must be application/json, got: text/plain',
+        function () use ($app) {
+            $app->getBodyRequest(10485760, true);
+        }
+    );
+    
+    unset($_SERVER['CONTENT_TYPE']);
+    unlink($tmpFile);
+};
+
+// Test 16: execDetach with array command (proper argument escaping)
+$tests[] = function () {
+    [$app, $tmpFile] = createNanoCoreApp();
+    
+    // execDetach calls ob_flush(), so we need an active output buffer
+    ob_start();
+    
+    // Use array form of command
+    $app->execDetach(['echo', 'hello world']);
+    
     ob_end_clean();
     unlink($tmpFile);
 };

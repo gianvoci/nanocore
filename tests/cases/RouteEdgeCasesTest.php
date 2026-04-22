@@ -2,7 +2,6 @@
 
 declare(strict_types=1);
 
-require __DIR__ . '/../../src/NanoCore.php';
 require_once __DIR__ . '/../TestHelpers.php';
 
 use NanoCore\NanoCore;
@@ -11,8 +10,7 @@ $tests = [];
 
 // Test 1: Backslashes in registered path are normalized to forward slashes
 $tests[] = function () {
-    $tmpFile = tempnam(sys_get_temp_dir(), 'nc_test_');
-    $app = new NanoCore($tmpFile);
+    [$app, $tmpFile] = createNanoCoreApp();
 
     $app->addRoute('GET', '\\api\\health', fn () => ['status' => 'healthy']);
     $response = runRequest($app, 'GET', '/api/health');
@@ -23,8 +21,7 @@ $tests[] = function () {
 
 // Test 2: Duplicate slashes in request URI are collapsed
 $tests[] = function () {
-    $tmpFile = tempnam(sys_get_temp_dir(), 'nc_test_');
-    $app = new NanoCore($tmpFile);
+    [$app, $tmpFile] = createNanoCoreApp();
 
     $app->addRoute('GET', '/api/health', fn () => ['ok' => true]);
     $response = runRequest($app, 'GET', '/api//health');
@@ -35,8 +32,7 @@ $tests[] = function () {
 
 // Test 3: Route without leading slash still matches
 $tests[] = function () {
-    $tmpFile = tempnam(sys_get_temp_dir(), 'nc_test_');
-    $app = new NanoCore($tmpFile);
+    [$app, $tmpFile] = createNanoCoreApp();
 
     $app->addRoute('GET', 'ping', fn () => ['status' => 'ok']);
     $response = runRequest($app, 'GET', '/ping');
@@ -47,8 +43,7 @@ $tests[] = function () {
 
 // Test 4: Multiple path parameters captured correctly
 $tests[] = function () {
-    $tmpFile = tempnam(sys_get_temp_dir(), 'nc_test_');
-    $app = new NanoCore($tmpFile);
+    [$app, $tmpFile] = createNanoCoreApp();
 
     $app->addRoute('GET', '/path/@a/@b', fn ($core, array $params) => $params);
     $response = runRequest($app, 'GET', '/path/x/y');
@@ -60,8 +55,7 @@ $tests[] = function () {
 
 // Test 5: Special chars in param name are stripped (hyphen removed)
 $tests[] = function () {
-    $tmpFile = tempnam(sys_get_temp_dir(), 'nc_test_');
-    $app = new NanoCore($tmpFile);
+    [$app, $tmpFile] = createNanoCoreApp();
 
     $app->addRoute('GET', '/test/@name-here', fn ($core, array $params) => $params);
     $response = runRequest($app, 'GET', '/test/value');
@@ -72,8 +66,7 @@ $tests[] = function () {
 
 // Test 6: Empty param name after sanitization gets auto-generated name
 $tests[] = function () {
-    $tmpFile = tempnam(sys_get_temp_dir(), 'nc_test_');
-    $app = new NanoCore($tmpFile);
+    [$app, $tmpFile] = createNanoCoreApp();
 
     $app->addRoute('GET', '/test/@', fn ($core, array $params) => $params);
     $response = runRequest($app, 'GET', '/test/value');
@@ -84,8 +77,7 @@ $tests[] = function () {
 
 // Test 7: Path params override query params on collision
 $tests[] = function () {
-    $tmpFile = tempnam(sys_get_temp_dir(), 'nc_test_');
-    $app = new NanoCore($tmpFile);
+    [$app, $tmpFile] = createNanoCoreApp();
 
     $app->addRoute('GET', '/users/@id', fn ($core, array $params) => $params);
     $response = runRequest($app, 'GET', '/users/42', ['id' => '99']);
@@ -96,8 +88,7 @@ $tests[] = function () {
 
 // Test 8: Wildcard @* captures entire rest of path
 $tests[] = function () {
-    $tmpFile = tempnam(sys_get_temp_dir(), 'nc_test_');
-    $app = new NanoCore($tmpFile);
+    [$app, $tmpFile] = createNanoCoreApp();
 
     $app->addRoute('GET', '/files/@*', fn ($core, array $params) => $params);
     $response = runRequest($app, 'GET', '/files/a/b/c/d.txt');
@@ -108,8 +99,7 @@ $tests[] = function () {
 
 // Test 9: Wildcard @* must be last segment — extra segments ignored
 $tests[] = function () {
-    $tmpFile = tempnam(sys_get_temp_dir(), 'nc_test_');
-    $app = new NanoCore($tmpFile);
+    [$app, $tmpFile] = createNanoCoreApp();
 
     $app->addRoute('GET', '/files/@*/extra', fn ($core, array $params) => $params);
     $response = runRequest($app, 'GET', '/files/a/b/extra');
@@ -120,8 +110,7 @@ $tests[] = function () {
 
 // Test 10: Case-insensitive method matching (lowercase registration)
 $tests[] = function () {
-    $tmpFile = tempnam(sys_get_temp_dir(), 'nc_test_');
-    $app = new NanoCore($tmpFile);
+    [$app, $tmpFile] = createNanoCoreApp();
 
     $app->addRoute('get', '/ping', fn () => ['status' => 'ok']);
     $response = runRequest($app, 'GET', '/ping');
@@ -132,8 +121,7 @@ $tests[] = function () {
 
 // Test 11: Root path / route
 $tests[] = function () {
-    $tmpFile = tempnam(sys_get_temp_dir(), 'nc_test_');
-    $app = new NanoCore($tmpFile);
+    [$app, $tmpFile] = createNanoCoreApp();
 
     $app->addRoute('GET', '/', fn () => ['root' => true]);
     $response = runRequest($app, 'GET', '/');
@@ -144,8 +132,7 @@ $tests[] = function () {
 
 // Test 12: Non-matching method returns 404 error
 $tests[] = function () {
-    $tmpFile = tempnam(sys_get_temp_dir(), 'nc_test_');
-    $app = new NanoCore($tmpFile);
+    [$app, $tmpFile] = createNanoCoreApp();
 
     $app->addRoute('POST', '/submit', fn () => ['submitted' => true]);
 

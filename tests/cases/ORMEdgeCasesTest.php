@@ -2,7 +2,6 @@
 
 declare(strict_types=1);
 
-require __DIR__ . '/../../src/NanoORM.php';
 require_once __DIR__ . '/../TestHelpers.php';
 
 use NanoCore\NanoORM;
@@ -16,14 +15,9 @@ $tests[] = function () {
 
     $orm = new NanoORM($pdo, 'users');
 
-    $threw = false;
-    try {
+    assertThrows(\Exception::class, 'Delete conditions cannot be empty', function () use ($orm) {
         $orm->deleteWhere([]);
-    } catch (\Exception $e) {
-        $threw = true;
-        assertEquals('Delete conditions cannot be empty', $e->getMessage(), 'Exception message should match');
-    }
-    assertTrue($threw, 'deleteWhere with empty conditions should throw Exception');
+    });
 };
 
 // Test 2: save() update without primary key throws exception
@@ -39,14 +33,9 @@ $tests[] = function () {
     // Now unset the PK field — isNew is false, so save() will try to update
     unset($user->id);
 
-    $threw = false;
-    try {
+    assertThrows(\Exception::class, 'Cannot update record without primary key', function () use ($user) {
         $user->save();
-    } catch (\Exception $e) {
-        $threw = true;
-        assertEquals('Cannot update record without primary key', $e->getMessage(), 'Exception message should match');
-    }
-    assertTrue($threw, 'save() without primary key on persisted record should throw Exception');
+    });
 };
 
 // Test 3: findBy ignores registered JOINs
@@ -287,14 +276,9 @@ $tests[] = function () {
     $user = new NanoORM($pdo, 'users');
     $user->fill(['name' => 'Test']);
 
-    $threw = false;
-    try {
+    assertThrows(\Exception::class, 'Cannot delete record without primary key', function () use ($user) {
         $user->delete();
-    } catch (\Exception $e) {
-        $threw = true;
-        assertEquals('Cannot delete record without primary key', $e->getMessage(), 'Exception message should match');
-    }
-    assertTrue($threw, 'delete() without primary key should throw Exception');
+    });
 };
 
 // Test 16: findBy with limit parameter

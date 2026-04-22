@@ -2,7 +2,6 @@
 
 declare(strict_types=1);
 
-require __DIR__ . '/../../src/NanoORM.php';
 require_once __DIR__ . '/../TestHelpers.php';
 
 use NanoCore\NanoORM;
@@ -135,39 +134,25 @@ $tests[] = function () {
     $pdo = createMemoryPDO();
     prepareSchema($pdo);
 
-    $threw = false;
-    try {
+    assertThrows(\InvalidArgumentException::class, '', function () use ($pdo) {
         new NanoORM($pdo, 'invalid-table');
-    } catch (\InvalidArgumentException $e) {
-        $threw = true;
-    }
-    assertTrue($threw, 'Hyphenated table name should throw InvalidArgumentException');
+    });
 
-    $threw = false;
-    try {
+    assertThrows(\InvalidArgumentException::class, '', function () use ($pdo) {
         new NanoORM($pdo, 'users', 'bad key');
-    } catch (\InvalidArgumentException $e) {
-        $threw = true;
-    }
-    assertTrue($threw, 'Primary key with space should throw InvalidArgumentException');
+    });
 
-    $threw = false;
-    try {
+    assertThrows(\InvalidArgumentException::class, '', function () use ($pdo) {
         new NanoORM($pdo, '123numbers');
-    } catch (\InvalidArgumentException $e) {
-        $threw = true;
-    }
-    assertTrue($threw, 'Table name starting with digits should throw InvalidArgumentException');
+    });
 
-    // Valid table name should not throw
-    $threw = false;
+    // Valid table name should not throw InvalidArgumentException
+    // (It may throw other exceptions if the table doesn't exist, but validateIdentifier should be fine)
     try {
         new NanoORM($pdo, 'valid_table');
     } catch (\InvalidArgumentException $e) {
-        $threw = true;
+        assertTrue(false, 'Valid table name should not throw InvalidArgumentException');
     }
-    // valid_table doesn't exist, so loadTableSchema will fail — but that's a different exception
-    // We only care that validateIdentifier doesn't reject it
 };
 
 // Test 8: validateFieldName rejects invalid field names in findBy
@@ -175,13 +160,9 @@ $tests[] = function () {
     $pdo = createMemoryPDO();
     prepareSchema($pdo);
 
-    $threw = false;
-    try {
+    assertThrows(\InvalidArgumentException::class, '', function () use ($pdo) {
         (new NanoORM($pdo, 'users'))->findBy('id; DROP TABLE users--', 'test');
-    } catch (\InvalidArgumentException $e) {
-        $threw = true;
-    }
-    assertTrue($threw, 'SQL injection in findBy field name should throw InvalidArgumentException');
+    });
 };
 
 // Test 9: validateFieldName rejects invalid field names in deleteWhere
@@ -189,13 +170,9 @@ $tests[] = function () {
     $pdo = createMemoryPDO();
     prepareSchema($pdo);
 
-    $threw = false;
-    try {
+    assertThrows(\InvalidArgumentException::class, '', function () use ($pdo) {
         (new NanoORM($pdo, 'users'))->deleteWhere(['1=1 OR 1' => 'x']);
-    } catch (\InvalidArgumentException $e) {
-        $threw = true;
-    }
-    assertTrue($threw, 'SQL injection in deleteWhere field name should throw InvalidArgumentException');
+    });
 };
 
 // Test 10: sanitizeOrderBy validates ORDER BY
@@ -217,22 +194,14 @@ $tests[] = function () {
     assertTrue(count($results) >= 1, 'findAll with valid DESC order should succeed');
 
     // SQL injection in ORDER BY should throw
-    $threw = false;
-    try {
+    assertThrows(\InvalidArgumentException::class, '', function () use ($orm) {
         $orm->findAll([], 'name; DROP TABLE users--');
-    } catch (\InvalidArgumentException $e) {
-        $threw = true;
-    }
-    assertTrue($threw, 'SQL injection in ORDER BY should throw InvalidArgumentException');
+    });
 
     // ORDER BY starting with digit should throw
-    $threw = false;
-    try {
+    assertThrows(\InvalidArgumentException::class, '', function () use ($orm) {
         $orm->findAll([], '1=1');
-    } catch (\InvalidArgumentException $e) {
-        $threw = true;
-    }
-    assertTrue($threw, 'ORDER BY starting with digit should throw InvalidArgumentException');
+    });
 };
 
 // Test 11: addJoin validates parameters

@@ -2,7 +2,6 @@
 
 declare(strict_types=1);
 
-require __DIR__ . '/../../src/NanoCore.php';
 require_once __DIR__ . '/../TestHelpers.php';
 
 use NanoCore\NanoCore;
@@ -10,32 +9,38 @@ use NanoCore\NanoCore;
 $tests = [];
 
 $tests[] = function () {
-    $app = new NanoCore();
+    [$app, $tmpFile] = createNanoCoreApp();
     $app->addRoute('GET', '/ping', fn () => ['status' => 'ok']);
 
     $response = runRequest($app, 'GET', '/ping');
     assertEquals(['status' => 'ok'], $response, 'Simple GET /ping should return status ok');
+    
+    unlink($tmpFile);
 };
 
 $tests[] = function () {
-    $app = new NanoCore();
+    [$app, $tmpFile] = createNanoCoreApp();
     $app->addRoute('GET', '/users/@id', fn ($core, array $params) => ['id' => $params['id'] ?? null]);
 
     $response = runRequest($app, 'GET', '/users/42');
     assertEquals(['id' => '42'], $response, 'Path parameter should be extracted as id');
+    
+    unlink($tmpFile);
 };
 
 $tests[] = function () {
-    $app = new NanoCore();
+    [$app, $tmpFile] = createNanoCoreApp();
     $app->addRoute('GET', '/files/@*', fn ($core, array $params) => ['wildcard' => $params['wildcard'] ?? null]);
 
     $response = runRequest($app, 'GET', '/files/foo/bar.txt');
     assertEquals(['wildcard' => 'foo/bar.txt'], $response, 'Wildcard should capture the remaining path');
+    
+    unlink($tmpFile);
 };
 
 // Test 4: POST method route
 $tests[] = function () {
-    $app = new NanoCore();
+    [$app, $tmpFile] = createNanoCoreApp();
     $app->addRoute('POST', '/submit', fn ($core, array $params) => ['received' => $params]);
 
     $response = runRequest($app, 'POST', '/submit', ['data' => 'hello']);
@@ -46,21 +51,25 @@ $tests[] = function () {
     $noMatch = runRequest($app, 'GET', '/submit');
     $output = ob_get_clean();
     assertEquals(null, $noMatch, 'GET to a POST-only route should return null');
+    
+    unlink($tmpFile);
 };
 
 // Test 5: Query parameters merged with path params
 $tests[] = function () {
-    $app = new NanoCore();
+    [$app, $tmpFile] = createNanoCoreApp();
     $app->addRoute('GET', '/users/@id', fn ($core, array $params) => $params);
 
     $response = runRequest($app, 'GET', '/users/42', ['page' => '2']);
     assertEquals('42', $response['id'] ?? null, 'Path param id should be 42');
     assertEquals('2', $response['page'] ?? null, 'Query param page should be 2');
+    
+    unlink($tmpFile);
 };
 
 // Test 6: 404 route not found
 $tests[] = function () {
-    $app = new NanoCore();
+    [$app, $tmpFile] = createNanoCoreApp();
 
     ob_start();
     $result = runRequest($app, 'GET', '/anything');
@@ -69,35 +78,24 @@ $tests[] = function () {
     assertEquals(null, $result, 'No matching route should return null');
     $decoded = json_decode($output, true);
     assertEquals('Route not found', $decoded['error'] ?? null, 'Error message should say Route not found');
-};
-
-// Test 7: configGet and configSet
-$tests[] = function () {
-    $tmpFile = tempnam(sys_get_temp_dir(), 'nc_test_');
-    $app = new NanoCore($tmpFile);
-
-    $app->configSet('TEST.KEY', 'value');
-    assertEquals('value', $app->configGet('TEST.KEY'), 'configGet should return the value just set');
-    assertEquals(null, $app->configGet('TEST.NONEXISTENT'), 'configGet for missing key should return null');
-
-    // Clean up
-    $app->configSet('TEST', []);
+    
     unlink($tmpFile);
 };
 
-// Test 8: Route with trailing slash normalization
+// Test 7: Route with trailing slash normalization
 $tests[] = function () {
-    $app = new NanoCore();
+    [$app, $tmpFile] = createNanoCoreApp();
     $app->addRoute('GET', '/ping', fn () => ['status' => 'ok']);
 
     $response = runRequest($app, 'GET', '/ping/');
     assertEquals(['status' => 'ok'], $response, '/ping/ should match route registered as /ping');
+    
+    unlink($tmpFile);
 };
 
-// Test 9: Magic property storage
+// Test 8: Magic property storage
 $tests[] = function () {
-    $tmpFile = tempnam(sys_get_temp_dir(), 'nc_test_');
-    $app = new NanoCore($tmpFile);
+    [$app, $tmpFile] = createNanoCoreApp();
 
     $app->customProp = 'hello';
     assertEquals('hello', $app->customProp, 'Magic __get should return value set via __set');

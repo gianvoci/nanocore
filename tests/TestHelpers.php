@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/../vendor/autoload.php';
+
 /**
  * Shared test helpers for the NanoCore test suite.
  * Provides assertion functions, common setup helpers, and the test runner.
@@ -31,6 +33,34 @@ function assertTrue(bool $condition, string $message): void
     }
 }
 
+function assertThrows(string $exceptionClass, string $expectedMessage, callable $callback): void
+{
+    $threw = false;
+    try {
+        $callback();
+    } catch (Throwable $e) {
+        $threw = true;
+        if (!($e instanceof $exceptionClass)) {
+            throw new RuntimeException(sprintf(
+                'Expected %s, got %s: %s',
+                $exceptionClass,
+                get_class($e),
+                $e->getMessage()
+            ));
+        }
+        if ($expectedMessage !== '' && $e->getMessage() !== $expectedMessage) {
+            throw new RuntimeException(sprintf(
+                'Expected message "%s", got "%s"',
+                $expectedMessage,
+                $e->getMessage()
+            ));
+        }
+    }
+    if (!$threw) {
+        throw new RuntimeException("Expected {$exceptionClass} but nothing was thrown");
+    }
+}
+
 // ─── Database Helpers ─────────────────────────────────────────────────────────
 
 function createMemoryPDO(): PDO
@@ -43,13 +73,6 @@ function createMemoryPDO(): PDO
 function prepareSchema(PDO $pdo): void
 {
     $pdo->exec('CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, email TEXT, status TEXT)');
-    $pdo->exec('CREATE TABLE products (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, price REAL)');
-    $pdo->exec('CREATE TABLE orders (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, product_id INTEGER, status TEXT)');
-}
-
-function prepareJoinSchema(PDO $pdo): void
-{
-    $pdo->exec('CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, email TEXT)');
     $pdo->exec('CREATE TABLE products (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, price REAL)');
     $pdo->exec('CREATE TABLE orders (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, product_id INTEGER, status TEXT)');
 }
@@ -72,6 +95,13 @@ function runRequest(\NanoCore\NanoCore $app, string $method, string $path, array
 function tmpConfigPath(): string
 {
     return sys_get_temp_dir() . '/nc_test_' . uniqid() . '.env';
+}
+
+function createNanoCoreApp(): array
+{
+    $tmpFile = tmpConfigPath();
+    $app = new \NanoCore\NanoCore($tmpFile);
+    return [$app, $tmpFile];
 }
 
 // ─── Temp File Helpers ────────────────────────────────────────────────────────

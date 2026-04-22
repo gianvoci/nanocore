@@ -2,7 +2,6 @@
 
 declare(strict_types=1);
 
-require __DIR__ . '/../../src/NanoCore.php';
 require_once __DIR__ . '/../TestHelpers.php';
 
 use NanoCore\NanoCore;
@@ -11,8 +10,7 @@ $tests = [];
 
 // Test 1: Error handler converts PHP errors to ErrorException
 $tests[] = function () {
-    $tmpFile = tempnam(sys_get_temp_dir(), 'nc_test_');
-    $app = new NanoCore($tmpFile);
+    [$app, $tmpFile] = createNanoCoreApp();
 
     try {
         $caught = false;
@@ -35,8 +33,7 @@ $tests[] = function () {
 
 // Test 2: Exception handler emits JSON without file/line
 $tests[] = function () {
-    $tmpFile = tempnam(sys_get_temp_dir(), 'nc_test_');
-    $app = new NanoCore($tmpFile);
+    [$app, $tmpFile] = createNanoCoreApp();
 
     try {
         // Grab the exception handler that NanoCore registered
@@ -63,8 +60,7 @@ $tests[] = function () {
 
 // Test 3: run() catches exceptions and emits JSON error with correct HTTP status
 $tests[] = function () {
-    $tmpFile = tempnam(sys_get_temp_dir(), 'nc_test_');
-    $app = new NanoCore($tmpFile);
+    [$app, $tmpFile] = createNanoCoreApp();
     $app->addRoute('GET', '/boom', function () {
         throw new \Exception('Not found', 404);
     });
@@ -92,8 +88,7 @@ $tests[] = function () {
 
 // Test 4: run() falls back to 500 for invalid HTTP codes
 $tests[] = function () {
-    $tmpFile = tempnam(sys_get_temp_dir(), 'nc_test_');
-    $app = new NanoCore($tmpFile);
+    [$app, $tmpFile] = createNanoCoreApp();
     $app->addRoute('GET', '/bad', function () {
         throw new \Exception('Bad code', 999);
     });
@@ -123,8 +118,7 @@ $tests[] = function () {
 
 // Test 5: run() emits 500 for handler not callable
 $tests[] = function () {
-    $tmpFile = tempnam(sys_get_temp_dir(), 'nc_test_');
-    $app = new NanoCore($tmpFile);
+    [$app, $tmpFile] = createNanoCoreApp();
 
     // Inject a non-callable handler directly into the routes array
     $ref = new ReflectionClass($app);

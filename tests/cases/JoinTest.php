@@ -2,7 +2,6 @@
 
 declare(strict_types=1);
 
-require __DIR__ . '/../../src/NanoORM.php';
 require_once __DIR__ . '/../TestHelpers.php';
 
 use NanoCore\NanoORM;
@@ -12,7 +11,7 @@ $tests = [];
 // Test 1: Single INNER JOIN returns joined data
 $tests[] = function () {
     $pdo = createMemoryPDO();
-    prepareJoinSchema($pdo);
+    prepareSchema($pdo);
 
     $pdo->exec("INSERT INTO users (id, name) VALUES (1, 'Alice')");
     $pdo->exec("INSERT INTO orders (id, user_id, product_id) VALUES (1, 1, NULL)");
@@ -28,7 +27,7 @@ $tests[] = function () {
 // Test 2: Multiple INNER JOINs return data from all joined tables
 $tests[] = function () {
     $pdo = createMemoryPDO();
-    prepareJoinSchema($pdo);
+    prepareSchema($pdo);
 
     $pdo->exec("INSERT INTO users (id, name) VALUES (1, 'Alice')");
     $pdo->exec("INSERT INTO products (id, title) VALUES (1, 'Widget')");
@@ -47,27 +46,21 @@ $tests[] = function () {
 // Test 3: Invalid join type throws InvalidArgumentException
 $tests[] = function () {
     $pdo = createMemoryPDO();
-    prepareJoinSchema($pdo);
+    prepareSchema($pdo);
 
     $orm = new NanoORM($pdo, 'orders');
 
-    $threw = false;
-    try {
-        $orm->addJoin('users', 'user_id', 'id', 'INVALID');
-    } catch (InvalidArgumentException $e) {
-        $threw = true;
-        assertTrue(
-            str_contains($e->getMessage(), 'Invalid join type'),
-            'Exception message should mention invalid type'
-        );
-    }
-    assertTrue($threw, 'Invalid join type should throw InvalidArgumentException');
+    assertThrows(
+        \InvalidArgumentException::class,
+        "Invalid join type: 'INVALID'",
+        fn() => $orm->addJoin('users', 'user_id', 'id', 'INVALID')
+    );
 };
 
 // Test 4: LEFT JOIN returns null for missing foreign record
 $tests[] = function () {
     $pdo = createMemoryPDO();
-    prepareJoinSchema($pdo);
+    prepareSchema($pdo);
 
     $pdo->exec("INSERT INTO orders (id, user_id, product_id) VALUES (1, 999, NULL)");
 
@@ -82,7 +75,7 @@ $tests[] = function () {
 // Test 5: addJoin returns self for method chaining
 $tests[] = function () {
     $pdo = createMemoryPDO();
-    prepareJoinSchema($pdo);
+    prepareSchema($pdo);
 
     $orm = new NanoORM($pdo, 'orders');
     $returned = $orm->addJoin('users', 'user_id', 'id', 'INNER', ['name']);
@@ -93,39 +86,35 @@ $tests[] = function () {
 // Test 6: Invalid table name in addJoin throws InvalidArgumentException
 $tests[] = function () {
     $pdo = createMemoryPDO();
-    prepareJoinSchema($pdo);
+    prepareSchema($pdo);
 
     $orm = new NanoORM($pdo, 'orders');
 
-    $threw = false;
-    try {
-        $orm->addJoin('bad table', 'user_id', 'id');
-    } catch (InvalidArgumentException $e) {
-        $threw = true;
-    }
-    assertTrue($threw, 'Invalid table name in addJoin should throw InvalidArgumentException');
+    assertThrows(
+        \InvalidArgumentException::class,
+        '',
+        fn() => $orm->addJoin('bad table', 'user_id', 'id')
+    );
 };
 
 // Test 7: Invalid field name in addJoin select fields throws InvalidArgumentException
 $tests[] = function () {
     $pdo = createMemoryPDO();
-    prepareJoinSchema($pdo);
+    prepareSchema($pdo);
 
     $orm = new NanoORM($pdo, 'orders');
 
-    $threw = false;
-    try {
-        $orm->addJoin('users', 'user_id', 'id', 'INNER', ['bad field']);
-    } catch (InvalidArgumentException $e) {
-        $threw = true;
-    }
-    assertTrue($threw, 'Invalid select field name in addJoin should throw InvalidArgumentException');
+    assertThrows(
+        \InvalidArgumentException::class,
+        '',
+        fn() => $orm->addJoin('users', 'user_id', 'id', 'INNER', ['bad field'])
+    );
 };
 
 // Test 8: Select all fields from joined table with wildcard
 $tests[] = function () {
     $pdo = createMemoryPDO();
-    prepareJoinSchema($pdo);
+    prepareSchema($pdo);
 
     $pdo->exec("INSERT INTO users (id, name, email) VALUES (1, 'Alice', 'alice@example.com')");
     $pdo->exec("INSERT INTO orders (id, user_id, product_id) VALUES (1, 1, NULL)");
