@@ -36,6 +36,7 @@
 
 - `addRoute` accepts mixed method/path and casts to string internally.
 - `curlRequest` is static — called as `NanoCore::curlRequest($url, $options)`.
+- `curlRequest` with `'with_info' => true` returns `['body'=>mixed,'status'=>int,'content_type'=>string|null]`. Without it, returns the body directly (backward compatible).
 - `curlRequest` validates URLs before making requests: only `http`/`https` schemes allowed, private/restricted IPs are blocked (SSRF protection).
 - `curlRequest` retries up to 5 times with linear backoff (100ms, 200ms, 300ms...) and resets the curl handle between attempts. On failure, throws a generic "External request failed" exception (no internal details leaked).
 - Magic properties via `__get`/`__set` on NanoCore instance: `$app->body` reads request body via `getBodyRequest()` with a 10MB default size limit (throws on overflow). The limit is customizable only via direct `getBodyRequest($maxBytes)` calls. An optional `$validateContentType` parameter (defaults to `false`) can enforce `application/json` Content-Type.

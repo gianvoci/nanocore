@@ -311,6 +311,12 @@ $result = NanoCore::curlRequest('https://api.example.com/stream', [
 $html = NanoCore::curlRequest('https://example.com/page', [
     'raw' => true,
 ]);
+
+// Get response with metadata (status code, content type)
+$info = NanoCore::curlRequest('https://api.example.com/users', [
+    'with_info' => true,
+]);
+// $info = ['body' => ..., 'status' => 200, 'content_type' => 'application/json']
 ```
 
 **Options:**
@@ -321,6 +327,7 @@ $html = NanoCore::curlRequest('https://example.com/page', [
 | `params` | array | `[]` | Request parameters (query string for GET, POST body otherwise) |
 | `headers` | array | `[]` | HTTP headers |
 | `raw` | bool | `false` | Skip JSON decoding, return raw string |
+| `with_info` | bool | `false` | Return `['body'=>mixed,'status'=>int,'content_type'=>string|null]` instead of just the body |
 | `CURLOPT_*` | mixed | varies | Any curl constant — merged directly into curl options |
 
 Features:

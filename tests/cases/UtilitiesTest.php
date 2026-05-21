@@ -232,11 +232,11 @@ $tests[] = function () {
     assertTrue(str_contains($result['content_type'], 'application/json'), 'httpbin /get should return application/json content type');
 };
 
-// Test 20: curlRequest with_info returns correct status for 404
+// Test 20: curlRequest with_info returns correct status for non-200
 $tests[] = function () {
-    $result = NanoCore::curlRequest('https://httpbin.org/status/404', ['with_info' => true, 'raw' => true]);
-    assertTrue(is_array($result), 'with_info with 404 should return an array');
-    assertEquals(404, $result['status'], 'with_info status should be 404 for not found');
+    $result = NanoCore::curlRequest('https://httpbin.org/status/418', ['with_info' => true, 'raw' => true]);
+    assertTrue(is_array($result), 'with_info with non-200 should return an array');
+    assertEquals(418, $result['status'], 'with_info status should match the HTTP status code');
 };
 
 // Test 21: curlRequest with_info without raw returns JSON-decoded body
