@@ -36,6 +36,7 @@ class NanoCore
     private ?string $configFile;
     private ?string $localConfigFile = null;
     private ?array $configCache = null;
+    private static ?string $logBasePath = null;
     private array $storage = [];
 
     public function __construct(string $configFile = '.env')
@@ -44,6 +45,7 @@ class NanoCore
         $this->configFile = $this->validateConfigPath($configFile);
         $this->localConfigFile = dirname($this->configFile) . '/' . basename($this->configFile) . '.local';
         $this->basePath = $this->getBasePath();
+        self::$logBasePath = dirname($this->configFile);
         $this->setPHPConfig();
 
         // Set CORE.ROOT directly in cache — bypasses protected-key check
@@ -545,7 +547,7 @@ class NanoCore
     /**
      * Validate that a URL uses an allowed scheme and does not point to a restricted network.
      */
-    private static function validateUrl(string $url): void
+    public static function validateUrlNotRestricted(string $url): void
     {
         $parsed = parse_url($url);
 
@@ -588,7 +590,7 @@ class NanoCore
     /**
      * Validate that an IP address is not in a private or restricted range.
      */
-    private static function validateIpNotRestricted(string $ip): void
+    public static function validateIpNotRestricted(string $ip): void
     {
         $flags = [FILTER_FLAG_NO_PRIV_RANGE, FILTER_FLAG_NO_RES_RANGE];
         foreach ($flags as $flag) {
@@ -603,15 +605,23 @@ class NanoCore
      *
      * @param string $url The URL to make the request to.
      * @param array $options An optional array of options to customize the request.
-     *                       - 'method': The HTTP method to use for the request. Defaults to 'GET'.
-     *                       - 'params': The parameters to include in the request. Defaults to an empty array.
-     *                       - 'headers': The headers to include in the request. Defaults to an empty array.
+     *                       Logical keys (string):
+     *                       - 'method': HTTP method. Defaults to 'GET'.
+     *                       - 'params': Request parameters. Defaults to [].
+     *                       - 'headers': HTTP headers. Defaults to [].
+     *                       - 'raw': bool, skip JSON decoding. Defaults to false.
+     *                       CURLOPT keys (int):
+     *                       Any CURLOPT_* constant can be passed to override the default curl settings.
+     *                       Examples: CURLOPT_TIMEOUT, CURLOPT_CONNECTTIMEOUT, CURLOPT_WRITEFUNCTION.
+     *                       These are merged directly into the curl options array.
      * @throws \Exception When an error occurs during the cURL request.
      * @return mixed The response from the cURL request, decoded as JSON if possible.
      */
     public static function curlRequest(string $url, array $options = []): mixed
     {
-        self::validateUrl($url);
+        self::validateUrlNotRestricted($url);
+
+        $startTime = hrtime(true);
 
         $curlopt = [
             CURLOPT_RETURNTRANSFER => true,
@@ -622,27 +632,33 @@ class NanoCore
             CURLOPT_MAXREDIRS      => 5,
         ];
 
-        // merge defaults with options
-        $options = array_merge([
-            'method'  => 'GET',
-            'params'  => [],
-            'headers' => [],
-        ], $options);
+        // Extract logical keys with defaults
+        $method  = $options['method']  ?? 'GET';
+        $params  = $options['params']  ?? [];
+        $headers = $options['headers'] ?? [];
+        $raw     = $options['raw']     ?? false;
+
+        // Remove logical keys — whatever remains are CURLOPT_* constants
+        unset($options['method'], $options['params'], $options['headers'], $options['raw']);
+
+        // Merge caller-provided CURLOPT_* overrides into defaults
+        $curlopt = array_replace($curlopt, $options);
 
         // Configure HTTP method
-        $curlopt[CURLOPT_CUSTOMREQUEST] = strtoupper($options['method']);
+        $method = strtoupper($method);
+        $curlopt[CURLOPT_CUSTOMREQUEST] = $method;
 
-        if (!empty($options['params'])) {
-            if ($options['method'] === 'GET') {
-                $url .= (str_contains($url, '?') ? '&' : '?') . http_build_query($options['params']);
+        if (!empty($params)) {
+            if ($method === 'GET') {
+                $url .= (str_contains($url, '?') ? '&' : '?') . http_build_query($params);
             } else {
-                $curlopt[CURLOPT_POSTFIELDS] = $options['params'];
+                $curlopt[CURLOPT_POSTFIELDS] = $params;
             }
         }
 
         // Add headers if provided
-        if (!empty($options['headers'])) {
-            $curlopt[CURLOPT_HTTPHEADER] = $options['headers'];
+        if (!empty($headers)) {
+            $curlopt[CURLOPT_HTTPHEADER] = $headers;
         }
 
         $ch = curl_init($url);
@@ -664,6 +680,45 @@ class NanoCore
 
         if ($response === false) {
             throw new \Exception("External request failed");
+        }
+
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        // Log the request
+        if (self::$logBasePath !== null) {
+            $duration = (int) ((hrtime(true) - $startTime) / 1_000_000);
+            $paramsStr = is_array($params) ? json_encode($params, JSON_UNESCAPED_SLASHES) : (string) $params;
+            if (isset($curlopt[CURLOPT_WRITEFUNCTION])) {
+                $responseStr = '[streamed]';
+            } else {
+                $responseStr = (string) $response;
+                if (strlen($responseStr) > 1024) {
+                    $responseStr = substr($responseStr, 0, 1024) . '...';
+                }
+            }
+            $logLine = sprintf(
+                '[%s] curlRequest %s %s -> %d (%dms) | params: %s | response: %s',
+                date('Y-m-d H:i:s'),
+                $method,
+                $url,
+                $httpCode,
+                $duration,
+                $paramsStr,
+                $responseStr
+            );
+            $logPath = self::$logBasePath . '/nanocore.log';
+            file_put_contents($logPath, $logLine . PHP_EOL, FILE_APPEND | LOCK_EX);
+        }
+
+        // When CURLOPT_WRITEFUNCTION is set, curl_exec returns true on success — return it directly
+        if (isset($curlopt[CURLOPT_WRITEFUNCTION])) {
+            return $response;
+        }
+
+        // When 'raw' option is true, skip JSON decoding
+        if ($raw) {
+            return $response;
         }
 
         // Decode JSON when valid, otherwise return raw response

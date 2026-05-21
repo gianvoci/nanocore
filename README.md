@@ -296,14 +296,52 @@ $result = NanoCore::curlRequest('https://api.example.com/users', [
     'params'  => ['name' => 'Jane', 'email' => 'jane@example.com'],
     'headers' => ['Content-Type: application/json', 'Authorization: Bearer token123'],
 ]);
+
+// Custom CURLOPT overrides (timeouts, streaming, etc.)
+$result = NanoCore::curlRequest('https://api.example.com/stream', [
+    'method'  => 'POST',
+    'params'  => $body,
+    'headers' => ['Authorization: Bearer token123'],
+    CURLOPT_TIMEOUT        => 120,
+    CURLOPT_CONNECTTIMEOUT => 10,
+    CURLOPT_WRITEFUNCTION  => $callback,  // Streaming — callback receives chunks
+]);
+
+// Skip JSON decoding (e.g. HTML responses)
+$html = NanoCore::curlRequest('https://example.com/page', [
+    'raw' => true,
+]);
 ```
+
+**Options:**
+
+| Key | Type | Default | Description |
+| --- | --- | --- | --- |
+| `method` | string | `'GET'` | HTTP method (case-insensitive) |
+| `params` | array | `[]` | Request parameters (query string for GET, POST body otherwise) |
+| `headers` | array | `[]` | HTTP headers |
+| `raw` | bool | `false` | Skip JSON decoding, return raw string |
+| `CURLOPT_*` | mixed | varies | Any curl constant — merged directly into curl options |
 
 Features:
 
-- Automatic JSON decoding (returns raw string if not valid JSON)
+- Automatic JSON decoding (returns raw string if not valid JSON, or when `raw` is true)
+- CURLOPT passthrough — any `CURLOPT_*` constant can be passed to override defaults
+- Streaming support via `CURLOPT_WRITEFUNCTION` — method returns `true` on success, body consumed by callback
+- Request logging to `nanocore.log` (method, URL, status code, duration, params, response truncated at 1024 chars)
 - Up to 5 retries with linear backoff (100ms, 200ms, 300ms...)
-- 30s connect timeout, 30s total timeout
+- 30s connect timeout, 30s total timeout (overridable via CURLOPT)
 - SSRF protection: only `http`/`https` schemes, blocks private/restricted IPs, resolves DNS to validate
+
+### SSRF Validation (public)
+
+Validate URLs before making requests:
+
+```php
+// Throws if URL points to restricted network
+NanoCore::validateUrlNotRestricted('https://api.example.com');
+NanoCore::validateIpNotRestricted('192.168.1.1');  // Throws — private IP
+```
 
 ## Request Body
 
@@ -364,7 +402,7 @@ NanoCore has security protections built in:
 
 | Protection | Where | Description |
 | --- | --- | --- |
-| **SSRF Prevention** | `curlRequest` | Only http/https URLs. Blocks private IPs, localhost, and restricted ranges. DNS resolution is checked. |
+| **SSRF Prevention** | `curlRequest`, `validateUrlNotRestricted`, `validateIpNotRestricted` | Only http/https URLs. Blocks private IPs, localhost, and restricted ranges. DNS resolution is checked. Public validation methods for pre-checking URLs. |
 | **SQL Injection** | NanoORM | All identifiers validated. Field names backtick-quoted in queries. PDO prepared statements for all values. |
 | **XSS Prevention** | `renderHtml` | HTML-escaping enabled by default. Path traversal blocked. |
 | **Config Tampering** | `configSet` | Protected keys (`PHP.INI`, `CORE`) cannot be modified. Atomic file writes. |

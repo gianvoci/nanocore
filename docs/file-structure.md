@@ -34,7 +34,7 @@ nanocore/
 
 | File | Role |
 | --- | --- |
-| `src/NanoCore.php` | Core class with routing engine (pattern-based), config manager (.env format, dot-notation, in-memory cache, .env.local override), cURL helper with retry and linear backoff, request body parser with size limit, HTML template renderer, detached process executor. Sets custom error/exception handlers on construction (no file/line in responses). |
+| `src/NanoCore.php` | Core class with routing engine (pattern-based), config manager (.env format, dot-notation, in-memory cache, .env.local override), cURL helper with retry, linear backoff, CURLOPT passthrough, streaming support, and request logging, public SSRF validation methods, request body parser with size limit, HTML template renderer, detached process executor. Sets custom error/exception handlers on construction (no file/line in responses). |
 | `src/NanoORM.php` | ORM class accepting PDO + table name + optional primary key. Validates identifiers on construction. Auto-discovers schema via `DESCRIBE` (MySQL) or `PRAGMA table_info` (SQLite). Provides magic getters/setters, fill/toArray, findById/findBy/findAll (all return cloned instances), save (insert or update), delete/deleteWhere, and JOIN support via addJoin/fetchWithJoins. All identifiers validated against `/^[a-zA-Z_][a-zA-Z0-9_]*$/`. ORDER BY sanitized. SQL injection prevention via identifier validation + PDO prepared statements. |
 | `.env` | Runtime config file. Auto-created as empty if missing. Gitignored (contains sensitive data). Accessed via `configGet('SECTION.KEY')` and `configSet('SECTION.KEY', value)`. |
 | `.env.example` | Config template with commented-out examples. Tracked in git so developers know what settings are available. |

@@ -23,6 +23,7 @@ Lightweight PHP library providing routing, configuration management, a micro ORM
 | docs/commands.md | Dev, test, and lint commands |
 | docs/conventions-backend.md | PHP coding conventions, patterns, and rules |
 | docs/conventions-database.md | NanoORM usage, schema discovery, query patterns |
+| docs/conventions-testing.md | Test conventions, patterns, and rules |
 | docs/rules/error-handling.md | Exception and error handler patterns |
 | docs/rules/route-registration.md | Route pattern syntax and dispatch behavior |
 | docs/rules/config-management.md | Config get/set patterns and .env structure |
