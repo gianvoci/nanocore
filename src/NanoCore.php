@@ -610,6 +610,7 @@ class NanoCore
      *                       - 'params': Request parameters. Defaults to [].
      *                       - 'headers': HTTP headers. Defaults to [].
      *                       - 'raw': bool, skip JSON decoding. Defaults to false.
+     *                       - 'with_info': bool, return ['body'=>mixed,'status'=>int,'content_type'=>string|null] instead of just the body. Defaults to false.
      *                       CURLOPT keys (int):
      *                       Any CURLOPT_* constant can be passed to override the default curl settings.
      *                       Examples: CURLOPT_TIMEOUT, CURLOPT_CONNECTTIMEOUT, CURLOPT_WRITEFUNCTION.
@@ -633,13 +634,14 @@ class NanoCore
         ];
 
         // Extract logical keys with defaults
-        $method  = $options['method']  ?? 'GET';
-        $params  = $options['params']  ?? [];
-        $headers = $options['headers'] ?? [];
-        $raw     = $options['raw']     ?? false;
+        $method    = $options['method']    ?? 'GET';
+        $params    = $options['params']    ?? [];
+        $headers   = $options['headers']   ?? [];
+        $raw       = $options['raw']       ?? false;
+        $withInfo  = $options['with_info'] ?? false;
 
         // Remove logical keys — whatever remains are CURLOPT_* constants
-        unset($options['method'], $options['params'], $options['headers'], $options['raw']);
+        unset($options['method'], $options['params'], $options['headers'], $options['raw'], $options['with_info']);
 
         // Merge caller-provided CURLOPT_* overrides into defaults
         $curlopt = array_replace($curlopt, $options);
@@ -682,8 +684,20 @@ class NanoCore
             throw new \Exception("External request failed");
         }
 
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
+        $httpCode    = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $contentType = curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
+        if ($contentType === false) {
+            $contentType = null;
+        }
+        // Explicit cleanup — E_DEPRECATED from PHP 8.5 gets converted to ErrorException
+        // by our custom error handler; safe to swallow since curl_close is a no-op since 8.0
+        try {
+            curl_close($ch);
+        } catch (\ErrorException $e) {
+            if ($e->getSeverity() !== E_DEPRECATED) {
+                throw $e;
+            }
+        }
 
         // Log the request
         if (self::$logBasePath !== null) {
@@ -711,19 +725,29 @@ class NanoCore
             file_put_contents($logPath, $logLine . PHP_EOL, FILE_APPEND | LOCK_EX);
         }
 
-        // When CURLOPT_WRITEFUNCTION is set, curl_exec returns true on success — return it directly
+        // Determine the response body value
         if (isset($curlopt[CURLOPT_WRITEFUNCTION])) {
-            return $response;
+            // When CURLOPT_WRITEFUNCTION is set, curl_exec returns true on success — body consumed by callback
+            $body = $response;
+        } elseif ($raw) {
+            // When 'raw' option is true, skip JSON decoding
+            $body = $response;
+        } else {
+            // Decode JSON when valid, otherwise return raw response
+            $decoded = json_decode($response, true);
+            $body = json_last_error() === JSON_ERROR_NONE ? $decoded : $response;
         }
 
-        // When 'raw' option is true, skip JSON decoding
-        if ($raw) {
-            return $response;
+        // Return info array when with_info is requested
+        if ($withInfo) {
+            return [
+                'body'         => $body,
+                'status'       => (int) $httpCode,
+                'content_type' => $contentType,
+            ];
         }
 
-        // Decode JSON when valid, otherwise return raw response
-        $decoded = json_decode($response, true);
-        return json_last_error() === JSON_ERROR_NONE ? $decoded : $response;
+        return $body;
     }
 
     /**

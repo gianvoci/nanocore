@@ -209,4 +209,42 @@ $tests[] = function () {
     unlink($tmpFile);
 };
 
+// Test 17: curlRequest with with_info returns array with body, status, content_type keys
+$tests[] = function () {
+    $result = NanoCore::curlRequest('https://httpbin.org/get', ['with_info' => true, 'raw' => true]);
+    assertTrue(is_array($result), 'curlRequest with with_info should return an array');
+    assertTrue(array_key_exists('body', $result), 'with_info result should have body key');
+    assertTrue(array_key_exists('status', $result), 'with_info result should have status key');
+    assertTrue(array_key_exists('content_type', $result), 'with_info result should have content_type key');
+    assertEquals(200, $result['status'], 'with_info status should be 200 for successful request');
+};
+
+// Test 18: curlRequest without with_info returns body directly (backward compat)
+$tests[] = function () {
+    $result = NanoCore::curlRequest('https://httpbin.org/get', ['raw' => true]);
+    assertTrue(is_string($result), 'curlRequest without with_info should return string body directly');
+};
+
+// Test 19: curlRequest with_info content_type is populated
+$tests[] = function () {
+    $result = NanoCore::curlRequest('https://httpbin.org/get', ['with_info' => true, 'raw' => true]);
+    assertTrue(is_string($result['content_type']), 'with_info content_type should be a string for valid response');
+    assertTrue(str_contains($result['content_type'], 'application/json'), 'httpbin /get should return application/json content type');
+};
+
+// Test 20: curlRequest with_info returns correct status for 404
+$tests[] = function () {
+    $result = NanoCore::curlRequest('https://httpbin.org/status/404', ['with_info' => true, 'raw' => true]);
+    assertTrue(is_array($result), 'with_info with 404 should return an array');
+    assertEquals(404, $result['status'], 'with_info status should be 404 for not found');
+};
+
+// Test 21: curlRequest with_info without raw returns JSON-decoded body
+$tests[] = function () {
+    $result = NanoCore::curlRequest('https://httpbin.org/get', ['with_info' => true]);
+    assertTrue(is_array($result), 'with_info without raw should return an array');
+    assertEquals(200, $result['status'], 'with_info status should be 200');
+    assertTrue(is_array($result['body']), 'with_info body should be JSON-decoded array when response is JSON');
+};
+
 runTests($tests);
