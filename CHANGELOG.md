@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.1.1] - 2026-05-21
+
+### Added
+
+- `with_info` option in `curlRequest()` — when `true`, returns `['body'=>mixed,'status'=>int,'content_type'=>string|null]` instead of just the body
+
 ## [2.1.0] - 2026-05-21
 
 ### Added
@@ -13,7 +19,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - CURLOPT passthrough in `curlRequest()` — any `CURLOPT_*` constant can be passed in `$options` to override default curl settings
 - Streaming support via `CURLOPT_WRITEFUNCTION` — method returns `true` on success, body consumed by the callback
 - Request logging to `nanocore.log` — each `curlRequest` call logs method, URL, status code, duration, params, and response (truncated at 1024 chars)
-- `with_info` option in `curlRequest()` — when `true`, returns `['body'=>mixed,'status'=>int,'content_type'=>string|null]` instead of just the body
 
 ### Changed
 
