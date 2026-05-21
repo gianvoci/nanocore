@@ -4,20 +4,26 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [2026-05-21] - feat(http): enhance curlRequest with CURLOPT passthrough, streaming, raw mode, and request logging
+## [2.1.0] - 2026-05-21
 
-- Added public SSRF validation methods: `validateUrlNotRestricted()` and `validateIpNotRestricted()` (previously private)
-- Added `raw` option in `curlRequest()` to skip JSON decoding and return the raw response string
-- Added CURLOPT passthrough in `curlRequest()` — any `CURLOPT_*` constant can be passed in `$options` to override default curl settings
-- Added streaming support via `CURLOPT_WRITEFUNCTION` — method returns `true` on success, body consumed by the callback
-- Added request logging to `nanocore.log` — each `curlRequest` call logs method, URL, status code, duration, params, and response (truncated at 1024 chars)
+### Added
+
+- Public SSRF validation methods: `validateUrlNotRestricted()` and `validateIpNotRestricted()` (previously private)
+- `raw` option in `curlRequest()` to skip JSON decoding and return the raw response string
+- CURLOPT passthrough in `curlRequest()` — any `CURLOPT_*` constant can be passed in `$options` to override default curl settings
+- Streaming support via `CURLOPT_WRITEFUNCTION` — method returns `true` on success, body consumed by the callback
+- Request logging to `nanocore.log` — each `curlRequest` call logs method, URL, status code, duration, params, and response (truncated at 1024 chars)
+
+### Changed
+
 - Renamed `validateUrl()` to `validateUrlNotRestricted()` for clarity (was private, no breaking change)
 - Fixed method comparison bug: `'method' => 'get'` now correctly appends params as query string instead of POST body
+
+### Fixed
+
 - Used `array_replace` instead of `array_merge` for CURLOPT merging — `array_merge` reindexes integer keys, destroying CURLOPT constants
 - Added `curl_close()` after request completion to prevent resource leaks
 - Used `dirname($this->configFile)` for log path instead of URL basePath
-
----
 
 ## [2.0.0] - 2026-04-18
 
