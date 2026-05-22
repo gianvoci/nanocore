@@ -78,9 +78,9 @@ class NanoCore
 
         $configFile = $resolved . DIRECTORY_SEPARATOR . basename($configFile);
 
-        // Only enforce .env extension for new files — existing files are accepted as-is
-        if (!file_exists($configFile) && !str_ends_with($configFile, '.env')) {
-            throw new \Exception("Config file must be a .env file");
+        // Only enforce .env naming for new files — existing files are accepted as-is
+        if (!file_exists($configFile) && !str_starts_with(basename($configFile), '.env')) {
+            throw new \Exception("Config file must start with .env");
         }
 
         return $configFile;

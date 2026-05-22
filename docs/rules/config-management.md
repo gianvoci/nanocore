@@ -7,8 +7,8 @@
 Config is persisted in `.env` at the project root. The file is auto-created as empty if it doesn't exist.
 
 The config file path is validated on construction:
-- Must end in `.env`
-- Resolved to the current working directory (prevents writing to arbitrary locations)
+- New files must start with `.env` (e.g. `.env`, `.env.production`) — existing files are accepted as-is
+- Directory is resolved to prevent writing to arbitrary locations
 
 ## .env Format
 

@@ -97,7 +97,7 @@ $tests[] = function () {
 
 // Test 7: Custom config file path works
 $tests[] = function () {
-    $tmpFile = sys_get_temp_dir() . '/custom_config_' . uniqid() . '.env';
+    $tmpFile = sys_get_temp_dir() . DIRECTORY_SEPARATOR . '.env_custom_' . uniqid();
     $app = new NanoCore($tmpFile);
 
     $app->configSet('CUSTOM', 'works');

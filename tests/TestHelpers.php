@@ -94,7 +94,7 @@ function runRequest(\NanoCore\NanoCore $app, string $method, string $path, array
 
 function tmpConfigPath(): string
 {
-    return sys_get_temp_dir() . '/nc_test_' . uniqid() . '.env';
+    return sys_get_temp_dir() . DIRECTORY_SEPARATOR . '.env_test_' . uniqid();
 }
 
 function createNanoCoreApp(): array
