@@ -6,14 +6,6 @@
 
 Config is persisted in `.env` at the project root. The file is auto-created as empty if it doesn't exist.
 
-A `.env.local` file can override values from `.env`. Loading order:
-1. `.env` (base config)
-2. `.env.local` (overrides) — values from `.env.local` overwrite `.env` values
-
-The local file is derived from the main config file: same directory, same name + `.local` suffix.
-- `.env` → `.env.local`
-- `custom.env` → `custom.env.local`
-
 The config file path is validated on construction:
 - Must end in `.env`
 - Resolved to the current working directory (prevents writing to arbitrary locations)
@@ -107,5 +99,4 @@ This is enforced in the `ALLOWED_INI_SETTINGS` constant. To add a new directive,
 - `configSet` reads → modifies → writes the file, then updates the cache only on successful write.
 - `saveConfig` uses atomic writes (temp file + rename) to prevent data corruption.
 - `saveConfig` flattens nested arrays to dot-notation keys and writes them sorted alphabetically.
-- `saveConfig` only writes to the main config file (`.env`), never to `.env.local`.
 - Config file path is configurable: `new NanoCore('custom.env')`.

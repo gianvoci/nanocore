@@ -154,16 +154,6 @@ export APP.ENV=production
 
 All values are strings — `DB.PORT=3306` returns `"3306"`, not `3306`.
 
-### .env.local Override
-
-Create a `.env.local` file to override values from `.env` (useful for local development):
-
-```env
-# .env.local
-DB.HOST=127.0.0.1
-APP.DEBUG=true
-```
-
 ### Config Template
 
 A `.env.example` file is included as a template with all available settings commented out. Copy it to `.env` and fill in your values.

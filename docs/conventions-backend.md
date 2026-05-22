@@ -19,7 +19,7 @@
 
 ## Config System
 
-- Config lives in `.env` (or custom file passed to constructor). The file path is validated — must be a `.env` file within the project directory. A `.env.local` file can override values from `.env` (loaded second, values overwrite).
+- Config lives in `.env` (or custom file passed to constructor). The file path is validated — must be a `.env` file within the project directory.
 - Dot-notation keys: `configGet('PHP.INI')` returns the `PHP.INI` nested object.
 - `configSet` creates nested structure automatically. Protected keys (`PHP.INI`, `CORE`) cannot be modified via `configSet`.
 - `PHP.INI` is a special key — the constructor iterates it and calls `ini_set()` only for allowed directives (see `ALLOWED_INI_SETTINGS` constant). Unknown directives are silently skipped.
@@ -29,7 +29,6 @@
 - Config values are cached in memory after first read. Subsequent `configGet` calls return from cache.
 - `configSet` updates the cache only after a successful file write.
 - `saveConfig` uses atomic writes (temp file + rename) to prevent corruption. Flattens nested arrays to dot-notation `.env` format.
-- `.env.local` overrides `.env` — loaded second, values overwrite base config.
 - The cache is an in-memory property — it does not persist across requests.
 
 ## Type Patterns

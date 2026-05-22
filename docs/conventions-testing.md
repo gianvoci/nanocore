@@ -76,7 +76,7 @@ prepareSchema($pdo);
 - **ORM in-memory**: no cleanup needed — the PDO connection dies with the process
 - **Temp HTML files**: always `unlink($htmlPath)` at the end
 - **PHP ini settings**: save before modifying, restore after — `$previous = ini_get('key'); …; ini_set('key', $previous);`
-- **Companion temp files** (e.g. `.env.local`): use guarded cleanup — `if (file_exists($localFile)) { unlink($localFile); }`
+- **Companion temp files**: use guarded cleanup — `if (file_exists($companionFile)) { unlink($companionFile); }`
 
 ## Available Assertions
 

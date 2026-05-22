@@ -7,7 +7,7 @@ Lightweight PHP library providing routing, configuration management, a micro ORM
 - **Language**: PHP >=8.5
 - **Namespace**: `NanoCore` (PSR-4, maps to `src/`)
 - **Entry points**: Consumers instantiate `NanoCore\NanoCore` and call `addRoute()` + `run()`
-- **Config**: `.env` at project root, dot-notation access (`CORE.ROOT`, `PHP.INI`, etc.), `.env.local` overrides
+- **Config**: `.env` at project root, dot-notation access (`CORE.ROOT`, `PHP.INI`, etc.)
 - **No framework dependencies** — standalone, only requires PHP 8.5+
 
 ## Self-Maintenance Rules
