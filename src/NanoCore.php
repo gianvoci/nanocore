@@ -34,7 +34,7 @@ class NanoCore
     private array $routes = [];
     private string $basePath;
     private ?string $configFile;
-    private ?string $localConfigFile = null;
+
     private ?array $configCache = null;
     private static ?string $logBasePath = null;
     private array $storage = [];
@@ -43,7 +43,7 @@ class NanoCore
     {
         $this->setErrorHandlers();
         $this->configFile = $this->validateConfigPath($configFile);
-        $this->localConfigFile = dirname($this->configFile) . '/' . basename($this->configFile) . '.local';
+
         $this->basePath = $this->getBasePath();
         self::$logBasePath = dirname($this->configFile);
         $this->setPHPConfig();
@@ -279,8 +279,8 @@ class NanoCore
     ################
 
     /**
-     * Load config from .env file, with optional .env.local override.
-     * Returns the merged config array and caches it in memory.
+     * Load config from the .env file.
+     * Returns the config array and caches it in memory.
      */
     private function loadConfig(): array
     {
@@ -294,11 +294,6 @@ class NanoCore
 
         $config = [];
         $this->parseEnvFile($this->configFile, $config);
-
-        // .env.local overrides .env values
-        if (file_exists($this->localConfigFile)) {
-            $this->parseEnvFile($this->localConfigFile, $config);
-        }
 
         $this->configCache = $config;
         return $this->configCache;

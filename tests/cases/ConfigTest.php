@@ -189,25 +189,7 @@ $tests[] = function () {
     unlink($tmpFile);
 };
 
-// Test 14: .env.local overrides .env values
-$tests[] = function () {
-    $tmpFile = tmpConfigPath();
-    $localFile = $tmpFile . '.local';
-
-    file_put_contents($tmpFile, "APP.MODE=production\n");
-    file_put_contents($localFile, "APP.MODE=development\n");
-
-    $app = new NanoCore($tmpFile);
-
-    assertEquals('development', $app->configGet('APP.MODE'), '.env.local should override .env');
-
-    unlink($tmpFile);
-    if (file_exists($localFile)) {
-        unlink($localFile);
-    }
-};
-
-// Test 15: export prefix is stripped
+// Test 14: export prefix is stripped
 $tests[] = function () {
     $tmpFile = tmpConfigPath();
     file_put_contents($tmpFile, "export APP.ENV=staging\n");
@@ -219,7 +201,7 @@ $tests[] = function () {
     unlink($tmpFile);
 };
 
-// Test 16: Value with # survives round-trip
+// Test 15: Value with # survives round-trip
 $tests[] = function () {
     $tmpFile = tmpConfigPath();
     $app = new NanoCore($tmpFile);
@@ -233,7 +215,7 @@ $tests[] = function () {
     unlink($tmpFile);
 };
 
-// Test 17: Value with internal quotes preserved via strrpos
+// Test 16: Value with internal quotes preserved via strrpos
 $tests[] = function () {
     $tmpFile = tmpConfigPath();
     file_put_contents($tmpFile, 'APP.MSG="hello \"world\""');
@@ -246,7 +228,7 @@ $tests[] = function () {
     unlink($tmpFile);
 };
 
-// Test 18: Single-quoted values skip interpolation
+// Test 17: Single-quoted values skip interpolation
 $tests[] = function () {
     $tmpFile = tmpConfigPath();
     file_put_contents($tmpFile, "DB.HOST=localhost\nDB.URL='\${DB.HOST}:3306'");
