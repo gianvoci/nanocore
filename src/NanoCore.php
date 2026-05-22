@@ -702,9 +702,6 @@ class NanoCore
                 $responseStr = '[streamed]';
             } else {
                 $responseStr = (string) $response;
-                if (strlen($responseStr) > 1024) {
-                    $responseStr = substr($responseStr, 0, 1024) . '...';
-                }
             }
             $logLine = sprintf(
                 '[%s] curlRequest %s %s -> %d (%dms) | params: %s | response: %s',
