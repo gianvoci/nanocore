@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.1.2] - 2026-05-22
+
+### Changed
+
+- Removed `.env.local` config override mechanism — only the config file passed to the constructor is loaded now (no automatic `.env.local` overlay)
+
+### Removed
+
+- `$localConfigFile` property and related `.env.local` loading logic from NanoCore constructor and `loadConfig()` method
+- `.env.local` override test from ConfigTest
+- `.env.local` documentation sections from README, config-management.md, file-structure.md, conventions-backend.md, conventions-testing.md, and CLAUDE.md
+
 ## [2.1.1] - 2026-05-21
 
 ### Added
