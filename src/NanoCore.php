@@ -80,7 +80,7 @@ class NanoCore
 
         // Only enforce .env naming for new files — existing files are accepted as-is
         if (!file_exists($configFile) && !str_starts_with(basename($configFile), '.env')) {
-            throw new \Exception("Config file must start with .env");
+            throw new \Exception("Config file must start with .env, got: " . basename($configFile));
         }
 
         return $configFile;
