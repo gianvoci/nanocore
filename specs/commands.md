@@ -32,9 +32,14 @@ php tests/cases/UtilitiesTest.php
 php tests/cases/ORMTest.php
 php tests/cases/ORMEdgeCasesTest.php
 php tests/cases/JoinTest.php
+php tests/cases/CurlRequestTest.php
 ```
 
 All are standalone runners (no PHPUnit). They exit with code 0 on success, 1 on failure. Each test prints pass/fail to stdout.
+
+### Integration Tests
+
+`CurlRequestTest.php` uses `createTestServer()` and `stopTestServer()` from `TestHelpers.php` to spin up a local PHP built-in server for testing real HTTP requests. These tests require a working PHP CLI binary in PATH.
 
 ### Test Structure
 

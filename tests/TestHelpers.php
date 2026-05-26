@@ -113,6 +113,54 @@ function createTempHtml(string $content): string
     return $path;
 }
 
+// ─── Test Server Helper ──────────────────────────────────────────────────────
+
+function createTestServer(): ?array
+{
+    $command = PHP_BINARY . ' -S localhost:0 -t ' . escapeshellarg(sys_get_temp_dir());
+    $descriptors = [
+        0 => ['pipe', 'r'],
+        1 => ['pipe', 'w'],
+        2 => ['pipe', 'w'],
+    ];
+    $process = proc_open($command, $descriptors, $pipes);
+    if (!is_resource($process)) {
+        return null;
+    }
+    // Give the server a moment to start
+    usleep(100000);
+    // Read the port from stderr (PHP built-in server reports it)
+    $stderr = stream_get_contents($pipes[2]);
+    fclose($pipes[0]);
+    fclose($pipes[2]);
+    // Keep pipes[1] (stdout) open so the server stays alive
+    if (preg_match('/localhost:(\d+)/', $stderr, $matches)) {
+        $url = 'http://localhost:' . $matches[1];
+        return ['url' => $url, 'process' => $process, 'pipes' => $pipes];
+    }
+    // Server didn't start properly — clean up
+    fclose($pipes[1]);
+    proc_close($process);
+    return null;
+}
+
+/**
+ * Stop a test server created by createTestServer().
+ */
+function stopTestServer(array $server): void
+{
+    if (isset($server['pipes'])) {
+        foreach ($server['pipes'] as $pipe) {
+            if (is_resource($pipe)) {
+                fclose($pipe);
+            }
+        }
+    }
+    if (isset($server['process']) && is_resource($server['process'])) {
+        proc_close($server['process']);
+    }
+}
+
 // ─── Test Runner ──────────────────────────────────────────────────────────────
 
 /**

@@ -26,18 +26,19 @@ nanocore/
         ├── UtilitiesTest.php        # Utility tests
         ├── ORMTest.php              # ORM tests
         ├── ORMEdgeCasesTest.php     # ORM edge cases
-        └── JoinTest.php             # Join-specific tests
+        ├── JoinTest.php             # Join-specific tests
+        └── CurlRequestTest.php      # cURL SSRF/retry/integration tests
 ```
 
 ## Key Files
 
 | File | Role |
 | --- | --- |
-| `src/NanoCore.php` | Core class with routing engine (pattern-based), config manager (.env format, dot-notation, in-memory cache), cURL helper with retry, linear backoff, CURLOPT passthrough, streaming support, and request logging, public SSRF validation methods, request body parser with size limit, HTML template renderer, detached process executor. Sets custom error/exception handlers on construction (no file/line in responses). |
-| `src/NanoORM.php` | ORM class accepting PDO + table name + optional primary key. Validates identifiers on construction. Auto-discovers schema via `DESCRIBE` (MySQL) or `PRAGMA table_info` (SQLite). Provides magic getters/setters, fill/toArray, findById/findBy/findAll (all return cloned instances), save (insert or update), delete/deleteWhere, and JOIN support via addJoin/fetchWithJoins. All identifiers validated against `/^[a-zA-Z_][a-zA-Z0-9_]*$/`. ORDER BY sanitized. SQL injection prevention via identifier validation + PDO prepared statements. |
+| `src/NanoCore.php` | Core class with routing engine (pattern-based), config manager (.env format, dot-notation, in-memory cache), cURL helper with retry, linear backoff, CURLOPT passthrough, streaming support, and request logging, public SSRF validation methods, request body parser with size limit, HTML template renderer, detached process executor. Response methods (`json()`, `html()`, `redirect()`, `__nc_response` descriptor pattern). Middleware pipeline (`addMiddleware()`, reverse-order wrapping). Input validation (`validate()`, `check()`, 10 built-in rules). Event system (`on()`, `emit()`, 4 built-in events). CLI command dispatch (`addCommand()`, `runCli()`). Session management (`sessionStart()`, `sessionGet()`, `sessionSet()`, `sessionDestroy()`). Sets custom error/exception handlers on construction (no file/line in responses). |
+| `src/NanoORM.php` | ORM class accepting PDO + table name + optional primary key. Validates identifiers on construction. Auto-discovers schema via `DESCRIBE` (MySQL) or `PRAGMA table_info` (SQLite). Provides magic getters/setters, fill/toArray, findById/findBy/findAll (all return cloned instances), save (insert or update), delete/deleteWhere, and JOIN support via addJoin/fetchWithJoins. Pagination via `paginate()` with COUNT+SELECT, offset/limit, last_page. Transactions via `beginTransaction()`, `commit()`, `rollback()`, `transaction(callable)`. Migrations via static `migrateDir()`, `rollbackDir()`, `migrationStatus()` with driver detection (SQLite vs MySQL). All identifiers validated against `/^[a-zA-Z_][a-zA-Z0-9_]*$/`. ORDER BY sanitized. SQL injection prevention via identifier validation + PDO prepared statements. |
 | `.env` | Runtime config file. Auto-created as empty if missing. Gitignored (contains sensitive data). Accessed via `configGet('SECTION.KEY')` and `configSet('SECTION.KEY', value)`. |
 | `.env.example` | Config template with commented-out examples. Tracked in git so developers know what settings are available. |
 | `.gitattributes` | Marks dev files for exclusion from distribution archives (`export-ignore`). Excludes `/docs`, `/tests`, `CLAUDE.md`, `.env`, log files, and editor config. Works alongside `archive.exclude` in composer.json. |
 | `tests/runAllTests.php` | Test orchestrator. Uses glob to discover all `cases/*.php` files, runs each in a separate process, and reports pass/fail summary. |
-| `tests/TestHelpers.php` | Shared test infrastructure: `assertEquals`, `assertTrue`, `assertThrows` assertions; `createMemoryPDO`, `prepareSchema` database helpers; `runRequest` route helper; `tmpConfigPath` and `createTempHtml` file helpers; `runTests()` runner function. |
+| `tests/TestHelpers.php` | Shared test infrastructure: `assertEquals`, `assertTrue`, `assertThrows` assertions; `createMemoryPDO`, `prepareSchema` database helpers; `runRequest` route helper; `tmpConfigPath` and `createTempHtml` file helpers; `createTestServer()` and `stopTestServer()` for cURL integration tests; `runTests()` runner function. |
 | `tests/cases/*.php` | Individual test files. Each defines a `$tests[]` array of anonymous functions and calls `runTests($tests)` at the end. Standalone runners — no PHPUnit dependency. |

@@ -20,11 +20,17 @@ Two handlers are registered on instantiation:
 
 ## Route Dispatch Errors (`run()`)
 
-The `run()` method wraps dispatch in try/catch:
+The `run()` method wraps dispatch in try/catch catching `\Throwable`:
 
 - **404**: Route not matched → `throw new \Exception('Route not found', 404)`
 - **500**: Handler not callable → `throw new \Exception('Handler for route not callable', 500)`
-- **Any exception**: HTTP status from `$exception->getCode()`, clamped to 100–599 range (falls back to 500)
+- **Any \Throwable**: HTTP status from `$throwable->getCode()`, clamped to 100–599 range (falls back to 500)
+
+Built-in events emitted during dispatch:
+- `route.matched` — emitted on successful route match
+- `route.not_found` — emitted on 404
+- `error` — emitted on any `\Throwable` caught by `run()`
+- `response.sent` — emitted after every response is sent
 
 Response format on error:
 ```json
@@ -33,6 +39,18 @@ Response format on error:
     "code": 404
 }
 ```
+
+## Response Dispatch (`sendResponse()`)
+
+`run()` detects `__nc_response` descriptors in handler return values and delegates to `sendResponse()` (private):
+
+| Descriptor type | Behavior |
+| --- | --- |
+| `json` | Sets `Content-Type: application/json`, HTTP status, encodes data |
+| `html` | Sets `Content-Type: text/html`, HTTP status, renders template |
+| `redirect` | Sets `Location` header, HTTP status (default 302) |
+| Empty return | 204 No Content |
+| Null with custom status | Status-only response (e.g. 304 Not Modified) |
 
 ## Handler Pattern
 

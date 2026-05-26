@@ -8,7 +8,7 @@
     "support": {
         "issues": "https://github.com/gianvoci/nanocore/issues",
         "source": "https://github.com/gianvoci/nanocore",
-        "docs": "https://github.com/gianvoci/nanocore/tree/main/docs"
+        "docs": "https://github.com/gianvoci/nanocore/tree/main/specs"
     },
     "autoload": {
         "psr-4": {
@@ -25,6 +25,6 @@
         "php": ">=8.5"
     },
     "archive": {
-        "exclude": ["/docs", "/tests", "nanocore.log", ".env", "app.json", "CLAUDE.md", ".gitignore"]
+        "exclude": ["/specs", "/tests", "nanocore.log", ".env", "app.json", "CLAUDE.md", ".gitignore"]
     }
 }

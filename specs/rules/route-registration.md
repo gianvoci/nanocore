@@ -32,9 +32,29 @@ Rules:
 3. URI is normalized and base-path-stripped.
 4. Routes for the current HTTP method are iterated.
 5. Each route's regex pattern is tested against the URI.
-6. On match: path params extracted, merged with query params, handler called with `($app, $params)`.
-7. On no match after all routes: `Exception('Route not found', 404)`.
-8. Path params take precedence: if a path param and query param share the same key, the path param value wins (`array_merge` with path params second).
+6. On match: `route.matched` event emitted, path params extracted, merged with query params.
+7. Middleware chain executes (first registered = first executed), wrapping the handler.
+8. Handler called with `($app, $params)`.
+9. If handler returns a `__nc_response` descriptor, `sendResponse()` processes it.
+10. `response.sent` event emitted.
+11. On no match after all routes: `route.not_found` event emitted, `Exception('Route not found', 404)`.
+12. Path params take precedence: if a path param and query param share the same key, the path param value wins (`array_merge` with path params second).
+
+## Middleware
+
+```php
+$app->addMiddleware(function (NanoCore $app, array $params, callable $next): mixed {
+    // Before handler
+    $result = $next($app, $params);  // Call next middleware or handler
+    // After handler
+    return $result;
+});
+```
+
+- `addMiddleware()` registers middleware in order. First registered = first executed.
+- Internally, `run()` wraps the handler in reverse order: last registered wraps innermost.
+- `$next(NanoCore $app, array $params): mixed` — calls the next middleware or the final handler.
+- Middleware can return a `__nc_response` descriptor to short-circuit the chain.
 
 ## URI Normalization Examples
 

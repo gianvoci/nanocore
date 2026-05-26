@@ -5,8 +5,14 @@ A lightweight PHP micro-framework with routing, config management, a micro ORM, 
 ## Features
 
 - Pattern-based routing with path parameters and wildcards
+- Response methods: `json()`, `html()`, `redirect()`
+- Middleware pipeline with `$next` chaining
+- Input validation with 10 built-in rules
+- Event system with built-in lifecycle events
+- CLI command registration and auto-detection
+- Session management with config-driven settings
 - Env-based config management with dot-notation access
-- NanoORM: lightweight ORM with CRUD, joins, schema auto-discovery
+- NanoORM: lightweight ORM with CRUD, joins, pagination, transactions, migrations
 - HTTP client with retry and SSRF protection
 - Request body parser with size limit
 - HTML template rendering with XSS protection
@@ -47,11 +53,11 @@ use NanoCore\NanoCore;
 $app = new NanoCore();
 
 $app->addRoute('GET', '/', function ($app, $params) {
-    return ['message' => 'Hello, NanoCore!'];
+    return json(['message' => 'Hello, NanoCore!']);
 });
 
 $app->addRoute('GET', '/users/@id', function ($app, $params) {
-    return ['user_id' => $params['id']];
+    return json(['user_id' => $params['id']]);
 });
 
 $app->run();
@@ -87,7 +93,7 @@ $app->addRoute(string $method, string $path, callable $handler);
 | Syntax | Captures | Example |
 | --- | --- | --- |
 | `@name` | Single segment | `/users/@id` → `['id' => '42']` |
-| `@*` | Rest of path | `/files/@*` → `['wildcard' => 'docs/readme.md']` |
+| `@*` | Rest of path | `/files/@*` → `['wildcard' => 'specs/readme.md']` |
 | Multiple | One per segment | `/api/@version/@resource` → `['version' => 'v1', 'resource' => 'users']` |
 
 ### Query Parameters
@@ -115,6 +121,148 @@ $app->addRoute('GET', '/users/@id', function ($app, $params) {
 
 // Response: {"error":"User not found","code":404} with HTTP 404
 ```
+
+## Response Methods
+
+Return from handlers to send structured responses. `run()` detects `__nc_response` descriptors automatically.
+
+```php
+// JSON response with Content-Type header
+return json(['user' => $user], 201);
+
+// HTML template rendering
+return html('templates/profile.html', ['{{NAME}}' => $user->name]);
+
+// Redirect (CRLF stripped from URL for security)
+return redirect('/login', 302);
+```
+
+| Function | Signature | Description |
+| --- | --- | --- |
+| `json()` | `json($data, $status = 200)` | JSON response with Content-Type header |
+| `html()` | `html($path, $data, $escape = true)` | Rendered HTML template |
+| `redirect()` | `redirect($url, $status = 302)` | Redirect header (CR/LF stripped) |
+
+Returning a plain array still works — auto-encoded as JSON with status 200.
+
+## Middleware
+
+```php
+// First registered = first executed
+$app->addMiddleware(function ($app, $params, $next) {
+    // Before handler
+    $response = $next($app, $params);
+    // After handler
+    return $response;
+});
+```
+
+- Middleware wraps handlers in reverse order (last registered = innermost)
+- `$next` continues the chain to the next middleware or the route handler
+- Return value flows back through the middleware stack
+
+## Input Validation
+
+```php
+use function NanoCore\validate;
+use function NanoCore\check;
+
+// Throws Exception(422) on failure
+$validated = validate($data, [
+    'name'  => 'required|string',
+    'email' => 'required|email',
+    'age'   => 'int|min:0|max:150',
+]);
+
+// Returns result array — no exception
+$result = check($data, ['email' => 'required|email']);
+// $result = ['valid' => bool, 'errors' => array, 'data' => array]
+```
+
+### Built-in Rules
+
+| Rule | Param | Example |
+| --- | --- | --- |
+| `required` | — | `required` |
+| `string` | — | `string` |
+| `int` | — | `int` |
+| `float` | — | `float` |
+| `bool` | — | `bool` |
+| `email` | — | `email` |
+| `url` | — | `url` |
+| `min` | `:value` | `min:1` |
+| `max` | `:value` | `max:100` |
+| `regex` | `:pattern` | `regex:^[a-z]+$` |
+
+The `regex` rule auto-wraps the pattern in `/` delimiters — do not include delimiters in the param.
+
+## Events
+
+```php
+// Listen
+$app->on('route.matched', function ($data) {
+    // $data contains event-specific payload
+});
+
+// Emit
+$app->emit('custom.event', ['key' => 'value']);
+```
+
+### Built-in Events
+
+| Event | When |
+| --- | --- |
+| `route.matched` | After a route is matched |
+| `route.not_found` | No route matched the request |
+| `error` | On uncaught exception |
+| `response.sent` | After response is sent |
+
+Listeners catch `\Throwable` internally — one broken listener doesn't break the chain.
+
+## CLI Commands
+
+```php
+$app->addCommand('migrate', function ($app, $args) {
+    // Run migrations
+});
+
+$app->addCommand('seed', function ($app, $args) {
+    // Run seeders
+});
+```
+
+CLI mode is detected automatically — `run()` delegates to `runCli()` when `php_sapi_name() === 'cli'`. Exits with code 1 on unknown command.
+
+```bash
+php index.php migrate
+php index.php seed
+```
+
+## Sessions
+
+```php
+$app->sessionStart();                          // Idempotent — safe to call multiple times
+$app->sessionSet('user_id', 42);
+$userId = $app->sessionGet('user_id');         // → 42
+$userId = $app->sessionGet('user_id', 0);      // → 42 (with default)
+$app->sessionDestroy();
+```
+
+### Session Config
+
+Config keys read from `.env`:
+
+| Key | Description |
+| --- | --- |
+| `SESSION.AUTO_START` | Auto-start session on construction |
+| `SESSION.NAME` | Session cookie name |
+| `SESSION.LIFETIME` | Cookie lifetime in seconds |
+| `SESSION.PATH` | Cookie path |
+| `SESSION.DOMAIN` | Cookie domain |
+| `SESSION.SECURE` | HTTPS-only cookie |
+| `SESSION.HTTPONLY` | HTTP-only cookie (no JS access) |
+
+`sessionStart()` is idempotent. `sessionDestroy()` guards for active session.
 
 ## Configuration
 
@@ -236,6 +384,63 @@ $user->delete();
 (new NanoORM($pdo, 'users'))->deleteWhere(['status' => 'inactive']);
 ```
 
+### Pagination
+
+```php
+$result = (new NanoORM($pdo, 'users'))->paginate(1, 25, ['status' => 'active'], 'name ASC');
+// $result = [
+//     'data'     => [...],
+//     'total'    => 142,
+//     'page'     => 1,
+//     'per_page' => 25,
+//     'last_page' => 6,
+// ]
+```
+
+Validates `page` and `perPage` >= 1.
+
+### Transactions
+
+```php
+$orm = new NanoORM($pdo, 'users');
+
+// Manual control
+$orm->beginTransaction();
+try {
+    $orm->fill(['name' => 'Jane'])->save();
+    $orm->commit();
+} catch (\Throwable $e) {
+    $orm->rollback();
+}
+
+// Auto-rollback on failure
+$orm->transaction(function () use ($orm) {
+    $orm->fill(['name' => 'Jane'])->save();
+});
+```
+
+Note: MySQL auto-commits on DDL statements, so transactions are ineffective for DDL-heavy migrations on MySQL.
+
+### Migrations
+
+```php
+use NanoCore\NanoORM;
+
+// Run all pending migrations
+NanoORM::migrateDir($pdo, __DIR__ . '/migrations');
+
+// Rollback last batch
+NanoORM::rollbackDir($pdo, __DIR__ . '/migrations');
+
+// Check status
+$status = NanoORM::migrationStatus($pdo, __DIR__ . '/migrations');
+```
+
+File naming: `YYYY_MM_DD_HH_MM_SS_name.sql`
+Rollback files: `YYYY_MM_DD_HH_MM_SS_name_rollback.sql` (required for rollback)
+
+Driver detection for SQLite vs MySQL. Invalid file names throw `InvalidArgumentException`.
+
 ### Joins
 
 ```php
@@ -264,13 +469,26 @@ Join types: `INNER`, `LEFT`, `RIGHT`, `FULL`, `CROSS`.
 | `findById($id)` | `self\|null` | Find by primary key |
 | `findBy($field, $value, $limit)` | `array` | Find by field value |
 | `findAll($conds, $orderBy, $limit)` | `array` | Find with conditions, order, limit |
+| `paginate($page, $perPage, $conds, $orderBy)` | `array` | Paginated results with metadata |
 | `addJoin($table, $local, $foreign, $type, $fields)` | `self` | Register a JOIN |
 | `fetchWithJoins($conds)` | `array` | Execute query with registered JOINs |
+| `beginTransaction()` | `void` | Start a transaction |
+| `commit()` | `void` | Commit current transaction |
+| `rollback()` | `void` | Rollback current transaction |
+| `transaction(callable)` | `mixed` | Run callable with auto-rollback on `\Throwable` |
 | `toArray()` | `array` | Get all field data |
 | `clear()` | `self` | Reset data, joins, and isNew state (preserves schema) |
 | `getId()` | `mixed` | Get primary key value |
 | `isNew()` | `bool` | Check if record is unsaved |
 | `getTable()` | `string` | Get table name |
+
+Static methods:
+
+| Method | Description |
+| --- | --- |
+| `migrateDir($pdo, $dir)` | Run pending migrations from directory |
+| `rollbackDir($pdo, $dir)` | Rollback last migration batch |
+| `migrationStatus($pdo, $dir)` | Get migration status array |
 
 Magic properties via `__get`, `__set`, `__isset`, `__unset` for field access.
 
@@ -329,6 +547,10 @@ Features:
 - Up to 5 retries with linear backoff (100ms, 200ms, 300ms...)
 - 30s connect timeout, 30s total timeout (overridable via CURLOPT)
 - SSRF protection: only `http`/`https` schemes, blocks private/restricted IPs, resolves DNS to validate
+- `CURLOPT_FOLLOWLOCATION` forced `false` for SSRF safety
+- Credentials stripped from logged URLs
+- Response body truncated to 500 chars in logs
+- Retry uses `curl_close`+`curl_init` instead of `curl_reset`
 
 ### SSRF Validation (public)
 
@@ -339,6 +561,8 @@ Validate URLs before making requests:
 NanoCore::validateUrlNotRestricted('https://api.example.com');
 NanoCore::validateIpNotRestricted('192.168.1.1');  // Throws — private IP
 ```
+
+IPv6 bracket stripping blocks `[::1]`, `[::ffff:127.0.0.1]` and similar loopback variants.
 
 ## Request Body
 
@@ -366,7 +590,7 @@ $html = $app->renderHtml('templates/user.html', [
 ]);
 ```
 
-- Template path is validated (must be within project root)
+- Template path is validated (must be within project root, `DIRECTORY_SEPARATOR` appended to root path)
 - String values are HTML-escaped by default (prevents XSS)
 - Pass `false` as third argument to disable escaping: `$app->renderHtml($file, $data, false)`
 
@@ -382,6 +606,7 @@ $app->execDetach(['php', 'process.php', '--user', $userId, '--action', 'notify']
 
 Output is logged to `nanocore.log` in the project root.
 Output buffering is flushed safely — no errors if no buffer is active.
+Windows support via `escapeshellcmd()`.
 
 ## Magic Properties
 
@@ -399,13 +624,22 @@ NanoCore has security protections built in:
 
 | Protection | Where | Description |
 | --- | --- | --- |
-| **SSRF Prevention** | `curlRequest`, `validateUrlNotRestricted`, `validateIpNotRestricted` | Only http/https URLs. Blocks private IPs, localhost, and restricted ranges. DNS resolution is checked. Public validation methods for pre-checking URLs. |
+| **SSRF Prevention** | `curlRequest`, `validateUrlNotRestricted`, `validateIpNotRestricted` | Only http/https URLs. Blocks private IPs, localhost, restricted ranges, IPv6 brackets. DNS resolution checked. `FOLLOWLOCATION` disabled. |
+| **CRLF Injection** | `redirect()` | CR/LF characters stripped from redirect URLs |
+| **Path Traversal** | `renderHtml()` | `DIRECTORY_SEPARATOR` appended to root path prevents traversal |
 | **SQL Injection** | NanoORM | All identifiers validated. Field names backtick-quoted in queries. PDO prepared statements for all values. |
 | **XSS Prevention** | `renderHtml` | HTML-escaping enabled by default. Path traversal blocked. |
-| **Config Tampering** | `configSet` | Protected keys (`PHP.INI`, `CORE`) cannot be modified. Atomic file writes. |
-| **Command Injection** | `execDetach` | Array mode escapes each argument independently. |
+| **Config Tampering** | `configSet` | Protected keys (`PHP.INI`, `CORE`) cannot be modified. Atomic file writes. Internal double quotes escaped in `saveConfig()`. |
+| **Command Injection** | `execDetach` | Array mode escapes each argument independently. Windows support with `escapeshellcmd()`. |
 | **Arbitrary ini_set** | Constructor | Only 13 safe PHP directives are allowed. |
 | **Error Disclosure** | Error handlers | No file paths or line numbers in error responses. |
+| **Throwable Catching** | `run()` | Catches `\Throwable` not just `\Exception` |
+| **Credential Logging** | `curlRequest` | Credentials stripped from logged URLs |
+| **Response Log Truncation** | `curlRequest` | Response body truncated to 500 chars in logs |
+
+### Known Limitations
+
+- **DNS rebinding TOCTOU**: DNS resolution is checked before the request, but the actual connection may resolve to a different IP. This is a known limitation of client-side SSRF validation.
 
 ## Error Handling
 
@@ -415,6 +649,7 @@ NanoCore registers custom handlers on construction:
 - Uncaught exceptions return JSON with appropriate HTTP status
 - No internal paths leaked in responses
 - All JSON responses use `JSON_THROW_ON_ERROR` to prevent silent encoding failures
+- `run()` catches `\Throwable` (not just `\Exception`)
 
 In route handlers, throw exceptions with HTTP codes:
 

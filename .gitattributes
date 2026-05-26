@@ -1,5 +1,5 @@
 # Development files
-/docs               export-ignore
+/specs               export-ignore
 /tests              export-ignore
 /CLAUDE.md          export-ignore
 .env                export-ignore

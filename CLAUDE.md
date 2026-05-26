@@ -12,19 +12,19 @@ Lightweight PHP library providing routing, configuration management, a micro ORM
 
 ## Self-Maintenance Rules
 
-> - When modifying code, update the relevant file in `docs/`.
+> - When modifying code, update the relevant file in `specs/`.
 > - When modifying or implementing a feature, add or update the corresponding tests in `tests/cases/`.
 
 ## Documentation Index
 
 | File | Description |
 | --- | --- |
-| docs/file-structure.md | Directory map and purpose of each file |
-| docs/commands.md | Dev, test, and lint commands |
-| docs/conventions-backend.md | PHP coding conventions, patterns, and rules |
-| docs/conventions-database.md | NanoORM usage, schema discovery, query patterns |
-| docs/conventions-testing.md | Test conventions, patterns, and rules |
-| docs/rules/error-handling.md | Exception and error handler patterns |
-| docs/rules/route-registration.md | Route pattern syntax and dispatch behavior |
-| docs/rules/config-management.md | Config get/set patterns and .env structure |
-| docs/rules/orm-usage.md | CRUD, hydration, joins, and magic property patterns |
+| specs/file-structure.md | Directory map and purpose of each file |
+| specs/commands.md | Dev, test, and lint commands |
+| specs/conventions-backend.md | PHP coding conventions, patterns, and rules (response methods, middleware, validation, events, CLI, sessions, security) |
+| specs/conventions-database.md | NanoORM usage, schema discovery, query patterns, pagination, transactions, migrations |
+| specs/conventions-testing.md | Test conventions, patterns, and rules |
+| specs/rules/error-handling.md | Exception and error handler patterns, response dispatch, built-in events |
+| specs/rules/route-registration.md | Route pattern syntax, dispatch flow, middleware, events |
+| specs/rules/config-management.md | Config get/set patterns, .env structure, SESSION.* config keys |
+| specs/rules/orm-usage.md | CRUD, hydration, joins, pagination, transactions, migrations |

@@ -592,4 +592,325 @@ class NanoORM
         $this->joins = [];
         return $this;
     }
+
+    #############################
+    # PAGINATION
+    #############################
+
+    /**
+     * Paginate records with optional conditions and ordering.
+     *
+     * @param int $page Page number (1-based)
+     * @param int $perPage Records per page
+     * @param array $conditions Where conditions [field => value]
+     * @param string $orderBy Order by clause (e.g., "created_at DESC")
+     * @return array Pagination result with data, total, page, per_page, last_page
+     * @throws \InvalidArgumentException if page or perPage is less than 1
+     */
+    public function paginate(int $page, int $perPage, array $conditions = [], string $orderBy = ''): array
+    {
+        if ($page < 1) {
+            throw new \InvalidArgumentException('Page must be >= 1');
+        }
+        if ($perPage < 1) {
+            throw new \InvalidArgumentException('Per page must be >= 1');
+        }
+
+        $offset = ($page - 1) * $perPage;
+
+        // Build WHERE clause once, reuse for both COUNT and SELECT
+        $params = [];
+        $whereSql = '';
+        if (!empty($conditions)) {
+            $whereClauses = [];
+            foreach ($conditions as $field => $value) {
+                $field = $this->validateFieldName($field);
+                $whereClauses[] = "{$field} = :{$field}";
+                $params[":{$field}"] = $value;
+            }
+            $whereSql = ' WHERE ' . implode(' AND ', $whereClauses);
+        }
+
+        // COUNT query
+        $countSql = "SELECT COUNT(*) as total FROM {$this->table}{$whereSql}";
+        $stmt = $this->pdo->prepare($countSql);
+        $stmt->execute($params);
+        $total = (int) $stmt->fetch(\PDO::FETCH_ASSOC)['total'];
+
+        // SELECT query
+        $selectSql = "SELECT * FROM {$this->table}{$whereSql}";
+
+        if ($orderBy !== '') {
+            $orderBy = $this->sanitizeOrderBy($orderBy);
+            if ($orderBy !== '') {
+                $selectSql .= " ORDER BY {$orderBy}";
+            }
+        }
+
+        // $perPage and $offset are int type-hinted/computed, safe to interpolate
+        $selectSql .= " LIMIT {$perPage} OFFSET {$offset}";
+
+        $stmt = $this->pdo->prepare($selectSql);
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+
+        $results = [];
+        foreach ($rows as $row) {
+            $results[] = (clone $this)->hydrate($row);
+        }
+
+        $lastPage = max(1, (int) ceil($total / $perPage));
+
+        return [
+            'data'      => $results,
+            'total'     => $total,
+            'page'      => $page,
+            'per_page'  => $perPage,
+            'last_page' => $lastPage,
+        ];
+    }
+    ##############
+    # TRANSACTIONS
+    ##############
+
+    /**
+     * Start a database transaction
+     */
+    public function beginTransaction(): void
+    {
+        $this->pdo->beginTransaction();
+    }
+
+    /**
+     * Commit the current transaction
+     */
+    public function commit(): void
+    {
+        $this->pdo->commit();
+    }
+
+    /**
+     * Roll back the current transaction
+     */
+    public function rollback(): void
+    {
+        $this->pdo->rollBack();
+    }
+
+    /**
+     * Execute a callback inside a transaction.
+     * Commits on success, rolls back on failure.
+     *
+     * @param callable $callback Code to run within the transaction
+     * @return mixed The return value of the callback
+     * @throws \Exception|\Error Re-thrown from the callback after rollback
+     */
+    public function transaction(callable $callback): mixed
+    {
+        $this->pdo->beginTransaction();
+
+        try {
+            $result = $callback();
+            $this->pdo->commit();
+            return $result;
+        } catch (\Exception $e) {
+            $this->pdo->rollBack();
+            throw $e;
+        } catch (\Error $e) {
+            $this->pdo->rollBack();
+            throw $e;
+        }
+    }
+
+    ##############
+    # MIGRATIONS
+    ##############
+
+    /**
+     * Run all pending migration files in a directory.
+     *
+     * @param \PDO $pdo Database connection
+     * @param string $migrationsDir Path to directory containing .sql migration files
+     * @return array List of applied migration file names
+     * @throws \Exception If migrations directory not found
+     * @throws \InvalidArgumentException If a migration file name is invalid
+     */
+    public static function migrateDir(\PDO $pdo, string $migrationsDir): array
+    {
+        if (!is_dir($migrationsDir)) {
+            throw new \Exception("Migrations directory not found: {$migrationsDir}");
+        }
+
+        self::ensureMigrationsTable($pdo);
+
+        $stmt = $pdo->query("SELECT name FROM migrations");
+        $appliedNames = $stmt->fetchAll(\PDO::FETCH_COLUMN, 0);
+
+        // Validate all .sql files and collect valid migration files
+        $files = [];
+        foreach (scandir($migrationsDir) as $fileName) {
+            if (!str_ends_with($fileName, '.sql')) {
+                continue;
+            }
+            if (!preg_match('/^\d+_[a-zA-Z0-9_]+\.sql$/', $fileName)) {
+                throw new \InvalidArgumentException("Invalid migration file name: {$fileName}");
+            }
+            $files[] = $fileName;
+        }
+
+        sort($files);
+
+        $newlyApplied = [];
+        foreach ($files as $fileName) {
+            if (in_array($fileName, $appliedNames, true)) {
+                continue;
+            }
+
+            $content = file_get_contents($migrationsDir . '/' . $fileName);
+            self::executeSqlFile($pdo, $content);
+
+            $stmt = $pdo->prepare("INSERT INTO migrations (name, applied_at) VALUES (:name, :appliedAt)");
+            $stmt->execute([
+                ':name'      => $fileName,
+                ':appliedAt' => date('Y-m-d H:i:s'),
+            ]);
+
+            $newlyApplied[] = $fileName;
+        }
+
+        return $newlyApplied;
+    }
+
+    /**
+     * Roll back the last N applied migrations using rollback files.
+     *
+     * @param \PDO $pdo Database connection
+     * @param string $migrationsDir Path to directory containing .sql migration files
+     * @param int $steps Number of migrations to roll back (default: 1)
+     * @return array List of rolled-back migration file names
+     * @throws \Exception If migrations directory not found or rollback file missing
+     */
+    public static function rollbackDir(\PDO $pdo, string $migrationsDir, int $steps = 1): array
+    {
+        if (!is_dir($migrationsDir)) {
+            throw new \Exception("Migrations directory not found: {$migrationsDir}");
+        }
+
+        self::ensureMigrationsTable($pdo);
+
+        $stmt = $pdo->prepare("SELECT name FROM migrations ORDER BY id DESC LIMIT :steps");
+        $stmt->bindValue(':steps', $steps, \PDO::PARAM_INT);
+        $stmt->execute();
+        $toRollback = $stmt->fetchAll(\PDO::FETCH_COLUMN, 0);
+
+        $rolledBack = [];
+        foreach ($toRollback as $name) {
+            $rollbackPath = $migrationsDir . '/rollback/' . $name;
+
+            if (!file_exists($rollbackPath)) {
+                throw new \Exception("No rollback file found for {$name}");
+            }
+
+            $content = file_get_contents($rollbackPath);
+            self::executeSqlFile($pdo, $content);
+
+            $stmt = $pdo->prepare("DELETE FROM migrations WHERE name = :name");
+            $stmt->execute([':name' => $name]);
+
+            $rolledBack[] = $name;
+        }
+
+        return $rolledBack;
+    }
+
+    /**
+     * Get the status of all migrations: which are applied and which are pending.
+     *
+     * @param \PDO $pdo Database connection
+     * @param string $migrationsDir Path to directory containing .sql migration files
+     * @return array With keys 'applied' and 'pending', each an array of file names
+     * @throws \Exception If migrations directory not found
+     */
+    public static function migrationStatus(\PDO $pdo, string $migrationsDir): array
+    {
+        if (!is_dir($migrationsDir)) {
+            throw new \Exception("Migrations directory not found: {$migrationsDir}");
+        }
+
+        self::ensureMigrationsTable($pdo);
+
+        $stmt = $pdo->query("SELECT name FROM migrations ORDER BY name");
+        $applied = $stmt->fetchAll(\PDO::FETCH_COLUMN, 0);
+
+        $allFiles = [];
+        foreach (scandir($migrationsDir) as $fileName) {
+            if (!str_ends_with($fileName, '.sql')) {
+                continue;
+            }
+            if (!preg_match('/^\d+_[a-zA-Z0-9_]+\.sql$/', $fileName)) {
+                throw new \InvalidArgumentException("Invalid migration file name: {$fileName}");
+            }
+            $allFiles[] = $fileName;
+        }
+
+        $pending = array_values(array_diff($allFiles, $applied));
+
+        return [
+            'applied' => $applied,
+            'pending' => $pending,
+        ];
+    }
+
+    /**
+     * Ensure the migrations tracking table exists.
+     *
+     * @param \PDO $pdo Database connection
+     */
+    private static function ensureMigrationsTable(\PDO $pdo): void
+    {
+        $driver = $pdo->getAttribute(\PDO::ATTR_DRIVER_NAME);
+
+        if ($driver === 'sqlite') {
+            $pdo->exec("CREATE TABLE IF NOT EXISTS migrations (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, applied_at TEXT)");
+        } else {
+            $pdo->exec("CREATE TABLE IF NOT EXISTS migrations (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(255) NOT NULL UNIQUE, applied_at DATETIME DEFAULT CURRENT_TIMESTAMP)");
+        }
+    }
+
+    /**
+     * Execute SQL content split by semicolons.
+     * For SQLite: executes each statement individually (no transaction, DDL not supported).
+     * For other drivers: wraps all statements in a transaction.
+     *
+     * @param \PDO $pdo Database connection
+     * @param string $content SQL content to execute
+     * @throws \Exception|\Error On execution failure (after rollback if in transaction)
+     */
+    private static function executeSqlFile(\PDO $pdo, string $content): void
+    {
+        $driver = $pdo->getAttribute(\PDO::ATTR_DRIVER_NAME);
+        $statements = array_filter(array_map('trim', explode(';', $content)));
+
+        if ($driver === 'sqlite') {
+            foreach ($statements as $sql) {
+                $pdo->exec($sql);
+            }
+            return;
+        }
+
+        // Non-SQLite: wrap in transaction
+        $pdo->beginTransaction();
+        try {
+            foreach ($statements as $sql) {
+                $pdo->exec($sql);
+            }
+            $pdo->commit();
+        } catch (\Exception $e) {
+            $pdo->rollBack();
+            throw $e;
+        } catch (\Error $e) {
+            $pdo->rollBack();
+            throw $e;
+        }
+    }
 }

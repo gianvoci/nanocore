@@ -38,6 +38,9 @@ class NanoCore
     private ?array $configCache = null;
     private static ?string $logBasePath = null;
     private array $storage = [];
+    private array $middlewares = [];
+    private array $listeners = [];
+    private array $commands = [];
 
     public function __construct(string $configFile = '.env')
     {
@@ -222,6 +225,11 @@ class NanoCore
     public function run(): mixed
     {
         try {
+            if (php_sapi_name() === 'cli' && !empty($this->commands)) {
+                $this->runCli();
+                return null;
+            }
+
             $method = strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET'));
             $rawUri = $_SERVER['REQUEST_URI'] ?? ($_SERVER['argv'][1] ?? '/');
             $params = php_sapi_name() === 'cli' ? array_slice($_SERVER['argv'], 2) : [];
@@ -251,16 +259,40 @@ class NanoCore
 
                     $finalParams = array_merge($params, $pathParams);
 
+                    $this->emit('route.matched', ['method' => $method, 'path' => $uri, 'params' => $finalParams]);
+
                     if (!is_callable($route['handler'])) {
                         throw new \Exception('Handler for route not callable', 500);
                     }
 
-                    return $route['handler']($this, $finalParams);
+                    // Build middleware chain
+                    $handler = $route['handler'];
+                    $chain = function (NanoCore $app, array $params) use ($handler): mixed {
+                        return $handler($app, $params);
+                    };
+
+                    // Wrap middlewares in reverse order (last registered = outermost)
+                    foreach (array_reverse($this->middlewares) as $middleware) {
+                        $next = $chain;
+                        $chain = function (NanoCore $app, array $params) use ($middleware, $next): mixed {
+                            return $middleware($app, $params, $next);
+                        };
+                    }
+
+                    $result = $chain($this, $finalParams);
+
+                    if (is_array($result) && isset($result['__nc_response']) && $result['__nc_response'] === true) {
+                        $this->sendResponse($result);
+                        return null;
+                    }
+                    return $result;
                 }
             }
 
+            $this->emit('route.not_found', ['method' => $method, 'path' => $uri]);
             throw new \Exception('Route not found', 404);
-        } catch (\Exception $exception) {
+        } catch (\Throwable $exception) {
+            $this->emit('error', ['exception' => $exception]);
             header('Content-Type: application/json');
             $status = (int)$exception->getCode();
             if ($status < 100 || $status > 599) {
@@ -274,6 +306,470 @@ class NanoCore
             return null;
         }
     }
+    #################
+    # RESPONSE METHODS
+    #################
+
+    /**
+     * Return a JSON response descriptor.
+     */
+    public function json(mixed $data, int $status = 200, array $headers = []): array
+    {
+        return [
+            '__nc_response' => true,
+            'type'          => 'json',
+            'body'          => $data,
+            'status'        => $status,
+            'headers'       => array_merge(['Content-Type: application/json'], $headers),
+        ];
+    }
+
+    /**
+     * Return an HTML response descriptor.
+     */
+    public function html(string $content, int $status = 200, array $headers = []): array
+    {
+        return [
+            '__nc_response' => true,
+            'type'          => 'html',
+            'body'          => $content,
+            'status'        => $status,
+            'headers'       => array_merge(['Content-Type: text/html; charset=UTF-8'], $headers),
+        ];
+    }
+
+    /**
+     * Return a redirect response descriptor.
+     */
+    public function redirect(string $url, int $status = 302): array
+    {
+        // Strip CR/LF to prevent CRLF header injection
+        $url = str_replace(["\r", "\n"], '', $url);
+
+        return [
+            '__nc_response' => true,
+            'type'          => 'redirect',
+            'body'          => null,
+            'status'        => $status,
+            'headers'       => ["Location: {$url}"],
+        ];
+    }
+
+    /**
+     * Send an HTTP response from a response descriptor array.
+     */
+    private function sendResponse(array $descriptor): void
+    {
+        $status = $descriptor['status'];
+        if ($status < 100 || $status > 599) {
+            $status = 500;
+        }
+
+        http_response_code($status);
+
+        foreach ($descriptor['headers'] as $header) {
+            header($header);
+        }
+
+        $type = $descriptor['type'];
+
+        // No body for redirects and no-content statuses
+        if ($type === 'redirect' || $status === 204 || $status === 304) {
+            $eventData = ['type' => $type, 'status' => $status];
+            if ($type === 'redirect') {
+                $eventData['url'] = $descriptor['url'] ?? null;
+            }
+            $this->emit('response.sent', $eventData);
+            return;
+        }
+
+        if ($type === 'json') {
+            echo json_encode($descriptor['body'], JSON_THROW_ON_ERROR);
+            $this->emit('response.sent', ['type' => $type, 'status' => $status]);
+            return;
+        }
+
+        if ($type === 'html') {
+            echo $descriptor['body'];
+        }
+
+        $this->emit('response.sent', ['type' => $type, 'status' => $status]);
+    }
+
+    #############
+    # MIDDLEWARE
+    #############
+
+    /**
+     * Append a middleware to the chain.
+     * Middlewares run in registration order (first added = first executed).
+     */
+    public function addMiddleware(callable $middleware): void
+    {
+        $this->middlewares[] = $middleware;
+    }
+
+    ################
+    # VALIDATION
+    ################
+
+    /**
+     * Validate data against rules, returning only validated fields.
+     * Throws on failure — use check() if you need error details.
+     *
+     * @param array $data  Input data to validate.
+     * @param array $rules Associative array of field => ruleString (e.g. 'required|integer|min:0').
+     * @return array Validated data (only fields that passed all rules).
+     * @throws \Exception When validation fails (code 422).
+     */
+    public function validate(array $data, array $rules): array
+    {
+        $result = $this->check($data, $rules);
+
+        if (!$result['valid']) {
+            throw new \Exception('Validation failed', 422);
+        }
+
+        return $result['data'];
+    }
+
+    /**
+     * Check data against rules and return a detailed result.
+     *
+     * @param array $data  Input data to validate.
+     * @param array $rules Associative array of field => ruleString.
+     * @return array ['valid' => bool, 'errors' => array, 'data' => array]
+     */
+    public function check(array $data, array $rules): array
+    {
+        $errors    = [];
+        $validated = [];
+
+        foreach ($rules as $field => $ruleString) {
+            $ruleList = explode('|', $ruleString);
+
+            // Skip absent optional fields — only 'required' makes a field mandatory
+            if (!array_key_exists($field, $data) && !in_array('required', $ruleList, true)) {
+                continue;
+            }
+
+            $value = $data[$field] ?? null;
+
+            foreach ($ruleList as $rule) {
+                $error = $this->applyRule($field, $value, $rule);
+                if ($error !== null) {
+                    $errors[$field][] = $error;
+                }
+            }
+
+            if (!isset($errors[$field])) {
+                $validated[$field] = $value;
+            }
+        }
+
+        return [
+            'valid'  => empty($errors),
+            'errors' => $errors,
+            'data'   => $validated,
+        ];
+    }
+
+    /**
+     * Apply a single validation rule to a field value.
+     *
+     * @param string $field Field name (for error messages).
+     * @param mixed  $value The value to validate.
+     * @param string $rule  Rule string (e.g. 'required', 'min:5').
+     * @return string|null Error message if validation fails, null if it passes.
+     * @throws \InvalidArgumentException On unknown rule or missing parameter.
+     */
+    private function applyRule(string $field, mixed $value, string $rule): ?string
+    {
+        $parsed = $this->parseRule($rule);
+
+        return match ($parsed['name']) {
+            'required' => ($value === null || $value === '')
+                ? "Field '{$field}' is required"
+                : null,
+
+            'integer' => (!is_numeric($value) || floor((float)$value) !== (float)$value)
+                ? "Field '{$field}' must be an integer"
+                : null,
+
+            'numeric' => !is_numeric($value)
+                ? "Field '{$field}' must be numeric"
+                : null,
+
+            'string' => !is_string($value)
+                ? "Field '{$field}' must be a string"
+                : null,
+
+            'min' => $this->validateMin($field, $value, $parsed['param']),
+
+            'max' => $this->validateMax($field, $value, $parsed['param']),
+
+            'email' => filter_var($value, FILTER_VALIDATE_EMAIL) === false
+                ? "Field '{$field}' must be a valid email"
+                : null,
+
+            'regex' => (function () use ($field, $value, $parsed): ?string {
+                // regex:pattern — matches value against the given regex pattern.
+                // The pattern is automatically wrapped in / delimiters.
+                // Do NOT include delimiters in the param. Use regex:^/api/ instead of regex:^\/api\/.
+                // Patterns containing / must escape it: regex:^\/api\/v1
+                $pattern = '/' . $parsed['param'] . '/';
+                $match = @preg_match($pattern, (string)$value);
+                if ($match === false) {
+                    return "Field '{$field}' has invalid regex pattern";
+                }
+                if ($match === 0) {
+                    return "Field '{$field}' does not match the required pattern";
+                }
+                return null;
+            })(),
+
+            'in' => $this->validateIn($field, $value, $parsed['param']),
+
+            'url' => filter_var($value, FILTER_VALIDATE_URL) === false
+                ? "Field '{$field}' must be a valid URL"
+                : null,
+
+            default => throw new \InvalidArgumentException("Unknown validation rule: {$parsed['name']}"),
+        };
+    }
+
+    /**
+     * Validate the 'min' rule — numeric comparison or string length.
+     */
+    private function validateMin(string $field, mixed $value, string $param): ?string
+    {
+        if (is_numeric($value)) {
+            if ((float)$value < (float)$param) {
+                return "Field '{$field}' must be at least {$param}";
+            }
+            return null;
+        }
+
+        if (mb_strlen((string)$value) < (int)$param) {
+            return "Field '{$field}' must be at least {$param} characters";
+        }
+
+        return null;
+    }
+
+    /**
+     * Validate the 'max' rule — numeric comparison or string length.
+     */
+    private function validateMax(string $field, mixed $value, string $param): ?string
+    {
+        if (is_numeric($value)) {
+            if ((float)$value > (float)$param) {
+                return "Field '{$field}' must be at most {$param}";
+            }
+            return null;
+        }
+
+        if (mb_strlen((string)$value) > (int)$param) {
+            return "Field '{$field}' must be at most {$param} characters";
+        }
+
+        return null;
+    }
+
+    /**
+     * Validate the 'in' rule — value must be in a comma-separated allow-list.
+     */
+    private function validateIn(string $field, mixed $value, string $param): ?string
+    {
+        $allowed = explode(',', $param);
+
+        if (!in_array($value, $allowed, true)) {
+            return "Field '{$field}' must be one of: {$param}";
+        }
+
+        return null;
+    }
+
+    /**
+     * Parse a rule string into name and optional parameter.
+     *
+     * @param string $rule Rule string (e.g. 'min:5', 'required').
+     * @return array ['name' => string, 'param' => string|null]
+     * @throws \InvalidArgumentException When min/max rules lack a numeric parameter.
+     */
+    private function parseRule(string $rule): array
+    {
+        if (str_contains($rule, ':')) {
+            $colonPos = strpos($rule, ':');
+            $name     = substr($rule, 0, $colonPos);
+            $param    = substr($rule, $colonPos + 1);
+        } else {
+            $name  = $rule;
+            $param = null;
+        }
+
+        // min/max require a numeric parameter
+        if (($name === 'min' || $name === 'max') && ($param === null || !is_numeric($param))) {
+            throw new \InvalidArgumentException("Rule '{$rule}' requires a numeric parameter");
+        }
+
+        return [
+            'name'  => $name,
+            'param' => $param,
+        ];
+    }
+
+    ###########
+    # EVENTS
+    ###########
+
+    /**
+     * Register a listener for an event.
+     */
+    public function on(string $event, callable $listener): void
+    {
+        if (!isset($this->listeners[$event])) {
+            $this->listeners[$event] = [];
+        }
+
+        $this->listeners[$event][] = $listener;
+    }
+
+    /**
+     * Emit an event, calling all registered listeners.
+     * One broken listener does not break the chain — errors are logged.
+     */
+    public function emit(string $event, array $data = []): void
+    {
+        if (!isset($this->listeners[$event]) || empty($this->listeners[$event])) {
+            return;
+        }
+
+        foreach ($this->listeners[$event] as $listener) {
+            try {
+                $listener($this, $data);
+            } catch (\Throwable $e) {
+                if (self::$logBasePath !== null) {
+                    $logPath = self::$logBasePath . '/nanocore.log';
+                    $logLine = sprintf(
+                        '[%s] Event listener error (%s): %s',
+                        date('Y-m-d H:i:s'),
+                        $event,
+                        $e->getMessage()
+                    );
+                    file_put_contents($logPath, $logLine . PHP_EOL, FILE_APPEND | LOCK_EX);
+                }
+            }
+        }
+    }
+
+    ################
+    # CLI COMMANDS
+    ################
+
+    /**
+     * Register a CLI command with a name and handler.
+     */
+    public function addCommand(string $name, callable $handler): void
+    {
+        if (!preg_match('/^[a-zA-Z0-9:_-]+$/', $name)) {
+            throw new \InvalidArgumentException("Invalid command name: {$name}");
+        }
+
+        $this->commands[$name] = $handler;
+    }
+
+    /**
+     * Dispatch a CLI command from $_SERVER['argv'].
+     */
+    public function runCli(): void
+    {
+        $argc = $_SERVER['argc'] ?? 0;
+
+        if ($argc < 2 || !isset($_SERVER['argv'][1])) {
+            echo "Available commands:\n";
+            foreach (array_keys($this->commands) as $name) {
+                echo "{$name}\n";
+            }
+            exit(1);
+        }
+
+        $commandName = $_SERVER['argv'][1];
+
+        if (!isset($this->commands[$commandName])) {
+            echo "Unknown command: {$commandName}\nAvailable commands:\n";
+            foreach (array_keys($this->commands) as $name) {
+                echo "{$name}\n";
+            }
+            exit(1);
+        }
+
+        $args = array_slice($_SERVER['argv'], 2);
+
+        $this->commands[$commandName]($this, $args);
+    }
+
+    ############
+    # SESSIONS
+    ############
+
+    /**
+     * Start a PHP session with config-driven cookie params.
+     * Idempotent — safe to call multiple times.
+     */
+    public function sessionStart(): void
+    {
+        if (session_status() === PHP_SESSION_ACTIVE) {
+            return;
+        }
+
+        $httpOnly = $this->configGet('SESSION.COOKIE_HTTPONLY');
+        if ($httpOnly !== null) {
+            ini_set('session.cookie_httponly', (int)(bool)$httpOnly);
+        }
+
+        $secure = $this->configGet('SESSION.COOKIE_SECURE');
+        if ($secure !== null) {
+            ini_set('session.cookie_secure', (int)(bool)$secure);
+        }
+
+        $strict = $this->configGet('SESSION.USE_STRICT_MODE');
+        if ($strict !== null) {
+            ini_set('session.use_strict_mode', (int)(bool)$strict);
+        }
+
+        session_start();
+    }
+
+    /**
+     * Get a value from the current session.
+     */
+    public function sessionGet(string $key, mixed $default = null): mixed
+    {
+        return $_SESSION[$key] ?? $default;
+    }
+
+    /**
+     * Set a value in the current session.
+     */
+    public function sessionSet(string $key, mixed $value): void
+    {
+        $_SESSION[$key] = $value;
+    }
+
+    /**
+     * Destroy the current session and clear session data.
+     */
+    public function sessionDestroy(): void
+    {
+        if (session_status() !== PHP_SESSION_ACTIVE) {
+            return;
+        }
+
+        session_destroy();
+        $_SESSION = [];
+    }
+
     ################
     # CONFIG MANAGER
     ################
@@ -450,10 +946,10 @@ class NanoCore
 
             $value = (string)$value;
 
-            // Quote values containing special characters (#, spaces, ${, quotes)
+            // Quote values containing special characters (#, spaces, ${, quotes, backslash)
             // so they survive round-trip through parseEnvFile
-            if (preg_match('/[#\s\${}]/', $value) || str_contains($value, '"') || str_contains($value, "'")) {
-                $value = '"' . $value . '"';
+            if (preg_match('/[\s#"\'\\\\]|^$/', $value)) {
+                $value = '"' . str_replace('"', '\\"', $value) . '"';
             }
 
             $lines[] = $key . '=' . $value;
@@ -540,7 +1036,12 @@ class NanoCore
     }
 
     /**
-     * Validate that a URL uses an allowed scheme and does not point to a restricted network.
+     * Validate that a URL does not resolve to a restricted IP address.
+     *
+     * Known limitation: DNS rebinding attacks can bypass this check because
+     * DNS resolution happens twice (once here via gethostbynamel, once by curl).
+     * Between the two resolutions, DNS could return a different IP.
+     * For critical security, consider using CURLOPT_RESOLVE to pin the validated IP.
      */
     public static function validateUrlNotRestricted(string $url): void
     {
@@ -556,6 +1057,11 @@ class NanoCore
         }
 
         $host = $parsed['host'] ?? '';
+
+        // Strip IPv6 brackets — parse_url returns [::1] with brackets
+        if (str_starts_with($host, '[') && str_ends_with($host, ']')) {
+            $host = substr($host, 1, -1);
+        }
 
         // Block well-known internal hostnames
         $blockedHosts = ['localhost', 'localhost.localdomain', 'ip6-localhost', 'ip6-loopback'];
@@ -621,7 +1127,7 @@ class NanoCore
 
         $curlopt = [
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_FOLLOWLOCATION => false,
             CURLOPT_AUTOREFERER    => true,
             CURLOPT_CONNECTTIMEOUT => 30,
             CURLOPT_TIMEOUT        => 30,
@@ -641,6 +1147,9 @@ class NanoCore
         // Merge caller-provided CURLOPT_* overrides into defaults
         $curlopt = array_replace($curlopt, $options);
 
+        // Force disable follow location for SSRF protection — redirect targets are not re-validated
+        $curlopt[CURLOPT_FOLLOWLOCATION] = false;
+
         // Configure HTTP method
         $method = strtoupper($method);
         $curlopt[CURLOPT_CUSTOMREQUEST] = $method;
@@ -658,6 +1167,8 @@ class NanoCore
             $curlopt[CURLOPT_HTTPHEADER] = $headers;
         }
 
+        $curlopt[CURLOPT_URL] = $url;
+
         $ch = curl_init($url);
 
         curl_setopt_array($ch, $curlopt);
@@ -666,7 +1177,8 @@ class NanoCore
         for ($retry = 0; $retry < 5; $retry++) {
             if ($retry > 0) {
                 usleep(100000 * $retry);
-                curl_reset($ch);
+                curl_close($ch);
+                $ch = curl_init();
                 curl_setopt_array($ch, $curlopt);
             }
             $response = curl_exec($ch);
@@ -698,20 +1210,25 @@ class NanoCore
         if (self::$logBasePath !== null) {
             $duration = (int) ((hrtime(true) - $startTime) / 1_000_000);
             $paramsStr = is_array($params) ? json_encode($params, JSON_UNESCAPED_SLASHES) : (string) $params;
+
+            // Strip userinfo from URL before logging to avoid credential disclosure
+            $safeUrl = preg_replace('#^(https?://)[^@]+@#', '$1', $url);
+
             if (isset($curlopt[CURLOPT_WRITEFUNCTION])) {
-                $responseStr = '[streamed]';
+                $logBody = '[streamed]';
             } else {
-                $responseStr = (string) $response;
+                $logBody = substr((string) $response, 0, 500) . (strlen((string) $response) > 500 ? '... [truncated]' : '');
             }
+
             $logLine = sprintf(
                 '[%s] curlRequest %s %s -> %d (%dms) | params: %s | response: %s',
                 date('Y-m-d H:i:s'),
                 $method,
-                $url,
+                $safeUrl,
                 $httpCode,
                 $duration,
                 $paramsStr,
-                $responseStr
+                $logBody
             );
             $logPath = self::$logBasePath . '/nanocore.log';
             file_put_contents($logPath, $logLine . PHP_EOL, FILE_APPEND | LOCK_EX);
@@ -786,7 +1303,12 @@ class NanoCore
         // Ensure the template is within the project root
         // CLI mode: basePath is empty, use current working directory as root
         $rootPath = realpath($this->basePath ?: '.');
-        if ($rootPath === false || !str_starts_with($realPath, $rootPath)) {
+        if ($rootPath === false) {
+            throw new \Exception("Template file path is outside the allowed directory");
+        }
+        // Append separator to prevent sibling directory bypass (e.g. /var/www2 matching /var/www)
+        $rootPath = rtrim($rootPath, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
+        if ($realPath !== $rootPath && !str_starts_with($realPath, $rootPath)) {
             throw new \Exception("Template file path is outside the allowed directory");
         }
 
@@ -842,6 +1364,16 @@ class NanoCore
      */
     public function execDetach(string|array $cmd): void
     {
+        if (PHP_OS_FAMILY === 'Windows') {
+            if (is_array($cmd)) {
+                $cmd = implode(' ', array_map('escapeshellarg', $cmd));
+            } else {
+                $cmd = escapeshellcmd($cmd);
+            }
+            pclose(popen('start /B ' . $cmd, 'r'));
+            return;
+        }
+
         if (is_array($cmd)) {
             $program = escapeshellcmd(array_shift($cmd));
             $escapedArgs = array_map('escapeshellarg', $cmd);
@@ -850,10 +1382,9 @@ class NanoCore
             $cmd = escapeshellcmd($cmd);
         }
 
-        $basePath = rtrim($this->basePath, '/');
-        $logPath = $basePath === '' ? 'nanocore.log' : $basePath . '/nanocore.log';
-        $logFile = escapeshellarg($logPath);
-        shell_exec("{$cmd} >>/dev/null 2>&1 >> {$logFile} &");
+        $logDir = self::$logBasePath ?: dirname(__DIR__);
+        $logFile = escapeshellarg($logDir . '/nanocore.log');
+        shell_exec("{$cmd} >> {$logFile} 2>/dev/null &");
         if (ob_get_level() > 0) {
             ob_flush();
         }

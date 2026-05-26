@@ -98,3 +98,63 @@ unset($orm->name);   // __unset — remove field from data
 - Field names in conditions (`findBy`, `findAll`, `deleteWhere`, `fetchWithJoins`) are validated — must be plain identifiers matching `/^[a-zA-Z_][a-zA-Z0-9_]*$/`. Dotted names like `table.column` are rejected.
 - `addJoin()` validates all parameters: table, keys must be valid identifiers; type must be one of `INNER`, `LEFT`, `RIGHT`, `FULL`, `CROSS`. Select fields are also validated — each field (except `*` wildcard) must match `/^[a-zA-Z_][a-zA-Z0-9_]*$/`.
 - `findAll()` sanitizes ORDER BY — column names are validated segment by segment, directions must be valid SQL keywords. Invalid input throws `InvalidArgumentException`.
+
+## Pagination
+
+```php
+$orm = new NanoORM($pdo, 'posts');
+
+$result = $orm->paginate(page: 1, perPage: 10, conditions: ['published' => 1], orderBy: 'created_at DESC');
+// $result = [
+//     'data'      => [...],     // array of NanoORM instances
+//     'total'     => 42,
+//     'page'      => 1,
+//     'per_page'  => 10,
+//     'last_page' => 5,
+// ]
+```
+
+- `$page` and `$perPage` must be >= 1 (throws `InvalidArgumentException` otherwise).
+- `last_page` is always >= 1 (even with zero results).
+
+## Transactions
+
+```php
+$orm = new NanoORM($pdo, 'orders');
+
+// Manual transaction
+$orm->beginTransaction();
+try {
+    $orm->fill(['product' => 'Widget', 'qty' => 5])->save();
+    $orm->commit();
+} catch (\Throwable $e) {
+    $orm->rollback();
+    throw $e;
+}
+
+// Automatic transaction
+$orm->transaction(function () use ($orm) {
+    $orm->fill(['product' => 'Gadget', 'qty' => 3])->save();
+    // Auto-commits on success, auto-rolls back on \Throwable
+});
+```
+
+- ⚠️ MySQL DDL statements cause implicit commit — they cannot be rolled back.
+
+## Migrations
+
+```php
+// Run all pending migrations
+NanoORM::migrateDir('/path/to/migrations', $pdo);
+
+// Roll back the last migration
+NanoORM::rollbackDir('/path/to/migrations', $pdo);
+
+// Check migration status
+$status = NanoORM::migrationStatus('/path/to/migrations', $pdo);
+// Returns array of ['file' => '...', 'applied' => bool]
+```
+
+- File naming: `YYYY_MM_DD_HH_MM_SS_name.sql` (e.g., `2025_01_15_10_30_00_create_users.sql`).
+- Invalid file names throw `InvalidArgumentException`.
+- Driver detection: checks `PDO::ATTR_DRIVER_NAME` for SQLite vs MySQL dialect.

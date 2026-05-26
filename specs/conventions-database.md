@@ -60,3 +60,37 @@ $orm->addJoin('table', 'localKey', 'foreignKey', 'INNER|LEFT|RIGHT|FULL|CROSS', 
 - `__set` silently ignores fields not in the discovered schema. If data isn't persisting, check that the column actually exists in the table.
 - `save()` on a record without a primary key set will throw on update: `"Cannot update record without primary key"`. This can happen if you hydrate from a partial SELECT that omits the PK column.
 - `deleteWhere([])` throws: `"Delete conditions cannot be empty"` — this is a safety guard against accidental full-table deletion.
+
+## Pagination
+
+- `paginate(int $page, int $perPage, array $conditions = [], string $orderBy = '')` — returns paginated results.
+- Both `$page` and `$perPage` must be >= 1 (validated, throws `InvalidArgumentException` if not).
+- Return structure:
+  ```php
+  [
+      'data'      => [...],     // array of cloned NanoORM instances
+      'total'     => 42,        // total matching rows (COUNT)
+      'page'      => 1,         // current page
+      'per_page'  => 10,        // items per page
+      'last_page' => 5,         // ceil(total / per_page), always >= 1
+  ]
+  ```
+- Implementation: runs COUNT query first, then SELECT with `OFFSET = ($page - 1) * $perPage` and `LIMIT = $perPage`.
+
+## Transactions
+
+- `beginTransaction()` — starts a database transaction via `PDO::beginTransaction()`.
+- `commit()` — commits the current transaction.
+- `rollback()` — rolls back the current transaction.
+- `transaction(callable $callback)` — runs `$callback` inside a transaction. Auto-commits on success, auto-rolls back on `\Throwable`. Returns the callback's return value.
+- ⚠️ MySQL DDL statements (ALTER, CREATE, DROP) cause implicit commit — they cannot be rolled back inside a transaction.
+
+## Migrations
+
+- `migrateDir(string $dir, PDO $pdo)` — static method. Runs all `.sql` files in `$dir` that haven't been applied yet, in alphabetical order.
+- `rollbackDir(string $dir, PDO $pdo)` — static method. Rolls back the most recently applied migration by running the corresponding `.sql` file again (down migration).
+- `migrationStatus(string $dir, PDO $pdo)` — static method. Returns array of all migrations with their applied status.
+- File naming format: `YYYY_MM_DD_HH_MM_SS_name.sql` (e.g., `2025_01_15_10_30_00_create_users.sql`). Invalid file names throw `InvalidArgumentException`.
+- Driver detection: checks `PDO::ATTR_DRIVER_NAME` — uses `SQLite` or `MySQL` dialect for the migrations table.
+- `ensureMigrationsTable(PDO $pdo)` — private static method. Creates the `nanocore_migrations` table if it doesn't exist.
+- `executeSqlFile(PDO $pdo, string $path)` — private static method. Reads and executes a `.sql` file.

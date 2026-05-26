@@ -4,6 +4,26 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.2.0] - 2026-05-26
+
+### Added
+
+- **Middleware pipeline** — `addMiddleware(callable $middleware): void` registers middleware; chain wraps handlers in reverse registration order; first registered = first executed; signature `function(NanoCore $app, array $params, callable $next): mixed`
+- **Request validation** — `validate(array $rules, array $data): array` validates input against rules (`required`, `string`, `int`, `float`, `bool`, `email`, `min`, `max`, `regex`, `in`); returns validated data or throws `InvalidArgumentException` with all errors
+- **Event system** — `on(string $event, callable $handler): void` registers event listeners; `emit(string $event, array $data = []): void` dispatches to all listeners; built-in events: `request.received`, `response.sent`, `error.occurred`
+- **CLI command runner** — `addCommand(string $name, callable $handler): void` registers CLI commands; `runCommands(): void` dispatches based on `$_SERVER['argv'][1]`; auto `--help` flag
+- **Session management** — `sessionStart(): void`, `sessionGet(string $key): mixed`, `sessionSet(string $key, mixed $value): void`, `sessionDestroy(): void` with `SESSION.*` config keys
+- **Response helper methods** — `json(mixed $data, int $status = 200): array`, `html(string $body, int $status = 200): array`, `redirect(string $url, int $status = 302): array` — return `__nc_response` descriptor arrays
+- **Database migrations** — `migrate(string $dir): void` applies SQL files sorted alphabetically; `migrationStatus(string $dir): array` reports applied/pending; rollback files required (`_down.sql` suffix)
+- **Pagination** — `paginate(string $table, int $page = 1, int $perPage = 20, array $where = []): array` returns `['data'=>[], 'total'=>int, 'page'=>int, 'per_page'=>int, 'last_page'=>int]`
+- **Test server helpers** — `createTestServer(): array` returns `['url','process','pipes']`; `stopTestServer(array $server): void` cleans up; used in CurlRequestTest SSRF validation tests
+- **SSRF hardening** — IPv6 bracket stripping, `CURLOPT_FOLLOWLOCATION` forced `false` after option merge (no caller override), DNS rebinding TOCTOU documented as known limitation
+
+### Changed
+
+- `run()` and `emit()` now catch `\Throwable` (consistency with `transaction()`)
+- `docs/` directory renamed to `specs/`
+
 ## [2.1.4] - 2026-05-22
 
 ### Removed
