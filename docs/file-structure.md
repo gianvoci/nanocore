@@ -39,5 +39,5 @@ nanocore/
 | `.env.example` | Config template with commented-out examples. Tracked in git so developers know what settings are available. |
 | `.gitattributes` | Marks dev files for exclusion from distribution archives (`export-ignore`). Excludes `/docs`, `/tests`, `CLAUDE.md`, `.env`, log files, and editor config. Works alongside `archive.exclude` in composer.json. |
 | `tests/runAllTests.php` | Test orchestrator. Uses glob to discover all `cases/*.php` files, runs each in a separate process, and reports pass/fail summary. |
-| `tests/TestHelpers.php` | Shared test infrastructure: `assertEquals`, `assertTrue` assertions; `createMemoryPDO`, `prepareSchema`, `prepareJoinSchema` database helpers; `runRequest` route helper; `tmpConfigPath` and `createTempHtml` file helpers; `runTests()` runner function. |
+| `tests/TestHelpers.php` | Shared test infrastructure: `assertEquals`, `assertTrue`, `assertThrows` assertions; `createMemoryPDO`, `prepareSchema` database helpers; `runRequest` route helper; `tmpConfigPath` and `createTempHtml` file helpers; `runTests()` runner function. |
 | `tests/cases/*.php` | Individual test files. Each defines a `$tests[]` array of anonymous functions and calls `runTests($tests)` at the end. Standalone runners — no PHPUnit dependency. |

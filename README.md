@@ -325,7 +325,7 @@ Features:
 - Automatic JSON decoding (returns raw string if not valid JSON, or when `raw` is true)
 - CURLOPT passthrough — any `CURLOPT_*` constant can be passed to override defaults
 - Streaming support via `CURLOPT_WRITEFUNCTION` — method returns `true` on success, body consumed by callback
-- Request logging to `nanocore.log` (method, URL, status code, duration, params, response truncated at 1024 chars)
+- Request logging to `nanocore.log` (method, URL, status code, duration, params, response)
 - Up to 5 retries with linear backoff (100ms, 200ms, 300ms...)
 - 30s connect timeout, 30s total timeout (overridable via CURLOPT)
 - SSRF protection: only `http`/`https` schemes, blocks private/restricted IPs, resolves DNS to validate
