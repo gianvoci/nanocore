@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2026-05-28] - docs: rename migration guide to simplified filename
+
+- Renamed `MIGRATION-2.1.4-to-2.2.0.md` to `MIGRATION-to-2.2.0.md` for simpler naming
+
+---
+
 ## [2026-05-28] - docs: migrate project overview from CLAUDE.md to AGENTS.md
 
 - Moved project overview and documentation index from CLAUDE.md to new AGENTS.md file

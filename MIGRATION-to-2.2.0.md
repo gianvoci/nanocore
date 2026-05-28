@@ -1,4 +1,4 @@
-# Migration Guide: 2.1.x → 2.2.0
+# Migration Guide: → 2.2.0
 
 ## Breaking Changes
 
