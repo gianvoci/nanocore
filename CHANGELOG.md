@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2026-05-28] - docs: migrate project overview from CLAUDE.md to AGENTS.md
+
+- Moved project overview and documentation index from CLAUDE.md to new AGENTS.md file
+- CLAUDE.md now references AGENTS.md
+
+---
+
 ## [2026-05-28] - refactor(core): remove deprecated curl_close() calls for PHP 8.5
 
 - Removed `curl_close()` calls from `curlRequest()` — no-op since PHP 8.0, emits deprecation warnings in PHP 8.5
