@@ -4,6 +4,27 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2026-05-28] - refactor(core): hardening fixes — sendJsonError, mb_substr, PCRE u flag, and bug fixes
+
+- Extracted shared `sendJsonError()` private method — deduplicates JSON error handling between exception handler and `run()`; response key changed from `message` to `error` for consistency
+- Clamped exception code to 100–599 in `sendJsonError()` (used raw code previously in `run()` catch)
+- Replaced `substr()` with `mb_substr()` for multibyte safety in route stripping, config parsing, IPv6 bracket stripping, and log truncation
+- Added `u` flag to PCRE regexes in route path normalization and config variable interpolation for proper UTF-8 handling
+- Added `declare(strict_types=1)` to `NanoCore.php`
+- Changed `renderHtml()` from `str_replace` to `strtr` to avoid placeholder collision
+- Added `url` key to redirect response descriptor for client reference
+- Added Content-Type header deduplication in `json()` — built-in header takes precedence over caller-supplied ones
+- Changed `__nc_response` check from strict `=== true` to `!empty()` for robustness
+- Replaced redundant "Handler for route not callable" throw with direct lambda wrapping
+- Changed SESSION boolean conversion from `(int)(bool)` cast to `filter_var($value, FILTER_VALIDATE_BOOLEAN)`
+- Added empty host rejection in SSRF URL validation
+- Log unknown `PHP.INI` settings via `error_log` instead of silently skipping
+- Added error handling for config file write failures (create and rename operations)
+- Updated `ErrorHandlingTest` for new `error` key and clamped 500 status code for out-of-range codes
+- Updated specs to reflect `sendJsonError()`, `mb_substr`, `strtr`, `filter_var` boolean conversion, and PHP.INI logging
+
+---
+
 ## [2026-05-28] - docs(specs): align all specification docs with actual codebase behavior
 
 - Updated `specs/conventions-backend.md` with correct response methods, validation rules, CLI dispatch, session config, and security table

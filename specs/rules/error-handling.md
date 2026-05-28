@@ -11,20 +11,19 @@ Two handlers are registered on instantiation:
    set_error_handler → throw ErrorException
    ```
 
-2. **Exception handler** — catches uncaught exceptions, emits JSON:
+2. **Exception handler** — catches uncaught exceptions, delegates to `sendJsonError()` which emits JSON:
     ```json
-    {"message": "...", "code": ...}
+    {"error": "...", "code": 500}
     ```
     File and line are intentionally excluded for security — they expose internal paths.
-    HTTP status is taken from the exception code, clamped to 100–599 range (defaults to 500 if outside range).
+    The shared `sendJsonError()` private method clamps the exception code to 100–599 range (defaults to 500 if outside range) and uses the clamped value for both HTTP status and the `code` field.
 
 ## Route Dispatch Errors (`run()`)
 
 The `run()` method wraps dispatch in try/catch catching `\Throwable`:
 
 - **404**: Route not matched → `throw new \Exception('Route not found', 404)`
-- **500**: Handler not callable → `throw new \Exception('Handler for route not callable', 500)`
-- **Any \Throwable**: HTTP status from `$throwable->getCode()`, clamped to 100–599 range (falls back to 500)
+- **Any \Throwable**: Delegates to `sendJsonError()` — HTTP status and JSON `code` field use the clamped exception code (100–599, falls back to 500)
 
 Built-in events emitted during dispatch:
 - `route.matched` — emitted on successful route match
@@ -62,6 +61,7 @@ All response methods (`json()`, `html()`, `redirect()`) return a descriptor arra
     'body'          => mixed,   // data for json, content string for html, null for redirect
     'status'        => int,     // HTTP status code
     'headers'       => array,   // array of header strings (e.g. ['Content-Type: application/json'])
+    'url'           => string,  // only for redirect type — the redirect URL
 ]
 ```
 
@@ -86,4 +86,4 @@ $app->addRoute('GET', '/users/@id', function ($app, $params) use ($pdo) {
 Key rules:
 - Always provide a valid HTTP status code (100–599) as the second argument.
 - Don't use codes outside 100–599 — NanoCore will default to 500.
-- `run()` returns the handler's return value for normal responses. If the handler returns a `__nc_response` descriptor, `run()` calls `sendResponse()` and returns `null`. If an exception is caught, `run()` outputs a JSON error and returns `null`.
+- `run()` returns the handler's return value for normal responses. If the handler returns a truthy `__nc_response` descriptor (`!empty()` check), `run()` calls `sendResponse()` and returns `null`. If an exception is caught, `run()` outputs a JSON error via `sendJsonError()` and returns `null`.

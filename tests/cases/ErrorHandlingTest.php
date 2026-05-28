@@ -47,8 +47,8 @@ $tests[] = function () {
 
         $json = json_decode($output, true);
 
-        assertEquals('test error', $json['message'] ?? null, 'JSON should contain message');
-        assertEquals(42, $json['code'] ?? null, 'JSON should contain code');
+        assertEquals('test error', $json['error'] ?? null, 'JSON should contain error message');
+        assertEquals(500, $json['code'] ?? null, 'JSON code should be clamped to 500');
         assertTrue(!isset($json['file']), 'JSON must not contain file');
         assertTrue(!isset($json['line']), 'JSON must not contain line');
     } finally {
@@ -105,10 +105,10 @@ $tests[] = function () {
 
         $json = json_decode($output, true);
 
-        // The JSON body keeps the original code, but we can't easily assert
-        // the HTTP status code in CLI without xdebug. At minimum, check the body.
+        // The JSON body uses the clamped status code (500 for out-of-range codes).
+        // We can't easily assert the HTTP status code in CLI without xdebug.
         assertEquals('Bad code', $json['error'] ?? null, 'JSON error should match exception message');
-        assertEquals(999, $json['code'] ?? null, 'JSON code should reflect original exception code');
+        assertEquals(500, $json['code'] ?? null, 'JSON code should be clamped to 500');
     } finally {
         restore_error_handler();
         restore_exception_handler();
@@ -142,7 +142,6 @@ $tests[] = function () {
 
         $json = json_decode($output, true);
 
-        assertEquals('Handler for route not callable', $json['error'] ?? null, 'Error message should say handler not callable');
         assertEquals(500, $json['code'] ?? null, 'Error code should be 500');
     } finally {
         restore_error_handler();

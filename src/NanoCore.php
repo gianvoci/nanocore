@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 /**
  * NanoCore - A small, lite, mini PHP framework
  *
@@ -61,6 +63,7 @@ class NanoCore
         $iniSettings = $this->configGet('PHP.INI') ?? [];
         foreach ($iniSettings as $setting => $value) {
             if (!in_array($setting, self::ALLOWED_INI_SETTINGS, true)) {
+                error_log("NanoCore: unknown PHP.INI setting '{$setting}' will be ignored");
                 continue;
             }
             ini_set($setting, $value);
@@ -88,6 +91,7 @@ class NanoCore
 
         return $configFile;
     }
+
     private function setErrorHandlers(): void
     {
         set_error_handler(function ($errno, $errstr, $errfile, $errline) {
@@ -95,21 +99,29 @@ class NanoCore
         });
 
         set_exception_handler(function ($exception): void {
-            $status = (int)$exception->getCode();
-            if ($status < 100 || $status > 599) {
-                $status = 500;
-            }
-
-            header('Content-Type: application/json');
-            http_response_code($status);
-            echo json_encode(
-                [
-                    'message' => $exception->getMessage(),
-                    'code'    => $exception->getCode(),
-                ],
-                JSON_THROW_ON_ERROR
-            );
+            $this->sendJsonError($exception);
         });
+    }
+
+    /**
+     * Send a JSON error response and terminate.
+     */
+    private function sendJsonError(\Throwable $exception): void
+    {
+        $status = (int)$exception->getCode();
+        if ($status < 100 || $status > 599) {
+            $status = 500;
+        }
+
+        header('Content-Type: application/json');
+        http_response_code($status);
+        echo json_encode(
+            [
+                'error' => $exception->getMessage(),
+                'code'  => $status,
+            ],
+            JSON_THROW_ON_ERROR
+        );
     }
 
     /**
@@ -135,7 +147,7 @@ class NanoCore
     private function normalizeRoutePath(string $path): string
     {
         $path = str_replace('\\', '/', $path);
-        $path = preg_replace('#/+#', '/', $path);
+        $path = preg_replace('#/+#u', '/', $path);
         $path = '/' . ltrim((string)$path, '/');
         $path = rtrim($path, '/');
 
@@ -152,7 +164,7 @@ class NanoCore
         }
 
         if (str_starts_with($path, $this->basePath)) {
-            $path = substr($path, strlen($this->basePath));
+            $path = mb_substr($path, mb_strlen($this->basePath));
             $path = $path === false ? '' : $path;
         }
 
@@ -261,14 +273,10 @@ class NanoCore
 
                     $this->emit('route.matched', ['method' => $method, 'path' => $uri, 'params' => $finalParams]);
 
-                    if (!is_callable($route['handler'])) {
-                        throw new \Exception('Handler for route not callable', 500);
-                    }
-
                     // Build middleware chain
-                    $handler = $route['handler'];
-                    $chain = function (NanoCore $app, array $params) use ($handler): mixed {
-                        return $handler($app, $params);
+                    $routeHandler = $route['handler'];
+                    $chain = function (NanoCore $app, array $params) use ($routeHandler): mixed {
+                        return $routeHandler($app, $params);
                     };
 
                     // Wrap middlewares in reverse order (last registered = outermost)
@@ -281,7 +289,7 @@ class NanoCore
 
                     $result = $chain($this, $finalParams);
 
-                    if (is_array($result) && isset($result['__nc_response']) && $result['__nc_response'] === true) {
+                    if (is_array($result) && !empty($result['__nc_response'])) {
                         $this->sendResponse($result);
                         return null;
                     }
@@ -293,16 +301,7 @@ class NanoCore
             throw new \Exception('Route not found', 404);
         } catch (\Throwable $exception) {
             $this->emit('error', ['exception' => $exception]);
-            header('Content-Type: application/json');
-            $status = (int)$exception->getCode();
-            if ($status < 100 || $status > 599) {
-                $status = 500;
-            }
-            http_response_code($status);
-            echo json_encode([
-                'error' => $exception->getMessage(),
-                'code'  => $exception->getCode(),
-            ], JSON_THROW_ON_ERROR);
+            $this->sendJsonError($exception);
             return null;
         }
     }
@@ -315,12 +314,18 @@ class NanoCore
      */
     public function json(mixed $data, int $status = 200, array $headers = []): array
     {
+        $customHeaders = [];
+        foreach ($headers as $h) {
+            if (!str_starts_with(strtolower($h), 'content-type:')) {
+                $customHeaders[] = $h;
+            }
+        }
         return [
             '__nc_response' => true,
             'type'          => 'json',
             'body'          => $data,
             'status'        => $status,
-            'headers'       => array_merge(['Content-Type: application/json'], $headers),
+            'headers'       => array_merge(['Content-Type: application/json'], $customHeaders),
         ];
     }
 
@@ -352,6 +357,7 @@ class NanoCore
             'body'          => null,
             'status'        => $status,
             'headers'       => ["Location: {$url}"],
+            'url'           => $url,
         ];
     }
 
@@ -601,8 +607,8 @@ class NanoCore
     {
         if (str_contains($rule, ':')) {
             $colonPos = strpos($rule, ':');
-            $name     = substr($rule, 0, $colonPos);
-            $param    = substr($rule, $colonPos + 1);
+            $name     = mb_substr($rule, 0, $colonPos);
+            $param    = mb_substr($rule, $colonPos + 1);
         } else {
             $name  = $rule;
             $param = null;
@@ -725,17 +731,17 @@ class NanoCore
 
         $httpOnly = $this->configGet('SESSION.COOKIE_HTTPONLY');
         if ($httpOnly !== null) {
-            ini_set('session.cookie_httponly', (int)(bool)$httpOnly);
+            ini_set('session.cookie_httponly', (int)filter_var($httpOnly, FILTER_VALIDATE_BOOLEAN));
         }
 
         $secure = $this->configGet('SESSION.COOKIE_SECURE');
         if ($secure !== null) {
-            ini_set('session.cookie_secure', (int)(bool)$secure);
+            ini_set('session.cookie_secure', (int)filter_var($secure, FILTER_VALIDATE_BOOLEAN));
         }
 
         $strict = $this->configGet('SESSION.USE_STRICT_MODE');
         if ($strict !== null) {
-            ini_set('session.use_strict_mode', (int)(bool)$strict);
+            ini_set('session.use_strict_mode', (int)filter_var($strict, FILTER_VALIDATE_BOOLEAN));
         }
 
         session_start();
@@ -785,7 +791,10 @@ class NanoCore
         }
 
         if (!file_exists($this->configFile)) {
-            file_put_contents($this->configFile, '');
+            $written = @file_put_contents($this->configFile, '');
+            if ($written === false) {
+                throw new \Exception("Cannot create config file: {$this->configFile}");
+            }
         }
 
         $config = [];
@@ -819,7 +828,7 @@ class NanoCore
 
             // Strip 'export ' prefix
             if (str_starts_with($line, 'export ')) {
-                $line = substr($line, 7);
+                $line = mb_substr($line, 7);
             }
 
             // Split on first '=' only
@@ -848,7 +857,7 @@ class NanoCore
             // Single-quoted values are literal — skip interpolation
             if (!$isSingleQuoted) {
                 $value = preg_replace_callback(
-                    '/\$\{([^}]+)\}/',
+                    '/\$\{([^}]+)\}/u',
                     function (array $matches) use ($config): string {
                         $resolved = $this->resolveDotKey($config, $matches[1]);
                         return $resolved ?? $matches[0];
@@ -872,14 +881,14 @@ class NanoCore
         if (str_starts_with($value, '"')) {
             $end = strrpos($value, '"');
             if ($end !== false && $end > 0) {
-                return substr($value, 0, $end + 1);
+                return mb_substr($value, 0, $end + 1);
             }
             return $value;
         }
         if (str_starts_with($value, "'")) {
             $end = strrpos($value, "'");
             if ($end !== false && $end > 0) {
-                return substr($value, 0, $end + 1);
+                return mb_substr($value, 0, $end + 1);
             }
             return $value;
         }
@@ -887,7 +896,7 @@ class NanoCore
         // Unquoted: split on ' #' and take the first part
         $commentPos = strpos($value, ' #');
         if ($commentPos !== false) {
-            $value = substr($value, 0, $commentPos);
+            $value = mb_substr($value, 0, $commentPos);
         }
 
         return trim($value);
@@ -948,7 +957,7 @@ class NanoCore
 
             // Quote values containing special characters (#, spaces, ${, quotes, backslash)
             // so they survive round-trip through parseEnvFile
-            if (preg_match('/[\s#"\'\\\\]|^$/', $value)) {
+            if (preg_match('/[\s#"\'\\\\]/u', $value) || $value === '') {
                 $value = '"' . str_replace('"', '\\"', $value) . '"';
             }
 
@@ -964,7 +973,11 @@ class NanoCore
 
         $written = file_put_contents($tmpFile, $content);
         if ($written !== false) {
-            rename($tmpFile, $this->configFile);
+            $renamed = rename($tmpFile, $this->configFile);
+            if ($renamed === false) {
+                @unlink($tmpFile);
+                throw new \Exception("Failed to save config file: {$this->configFile}");
+            }
             $this->configCache = $data;
         } else {
             @unlink($tmpFile);
@@ -1058,9 +1071,13 @@ class NanoCore
 
         $host = $parsed['host'] ?? '';
 
+        if ($host === '') {
+            throw new \Exception("URL must specify a host");
+        }
+
         // Strip IPv6 brackets — parse_url returns [::1] with brackets
         if (str_starts_with($host, '[') && str_ends_with($host, ']')) {
-            $host = substr($host, 1, -1);
+            $host = mb_substr($host, 1, -1);
         }
 
         // Block well-known internal hostnames
@@ -1207,7 +1224,7 @@ class NanoCore
             if (isset($curlopt[CURLOPT_WRITEFUNCTION])) {
                 $logBody = '[streamed]';
             } else {
-                $logBody = substr((string) $response, 0, 500) . (strlen((string) $response) > 500 ? '... [truncated]' : '');
+                $logBody = mb_substr((string) $response, 0, 500, 'UTF-8') . (mb_strlen((string) $response) > 500 ? '... [truncated]' : '');
             }
 
             $logLine = sprintf(
@@ -1312,7 +1329,7 @@ class NanoCore
             $escapedData = $data;
         }
 
-        return str_replace(array_keys($escapedData), array_values($escapedData), $tpl);
+        return strtr($tpl, $escapedData);
     }
 
     /**

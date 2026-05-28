@@ -69,14 +69,14 @@ Attempting `configSet('PHP.INI.display_errors', '1')` will throw an exception.
 | Key | Purpose |
 | --- | --- |
 | `CORE.ROOT` | Set automatically by the constructor to the detected base path. Do not set manually. |
-| `PHP.INI` | Group of `ini_set` key-value pairs. Only allowed directives are applied (see `ALLOWED_INI_SETTINGS` constant in NanoCore.php). Unknown directives are silently skipped. |
-| `SESSION.COOKIE_HTTPONLY` | Sets `session.cookie_httponly` via `ini_set` before `session_start()`. Cast to bool then int. |
-| `SESSION.COOKIE_SECURE` | Sets `session.cookie_secure` via `ini_set` before `session_start()`. Cast to bool then int. |
-| `SESSION.USE_STRICT_MODE` | Sets `session.use_strict_mode` via `ini_set` before `session_start()`. Cast to bool then int. |
+| `PHP.INI` | Group of `ini_set` key-value pairs. Only allowed directives are applied (see `ALLOWED_INI_SETTINGS` constant in NanoCore.php). Unknown directives are logged via `error_log` and skipped. |
+| `SESSION.COOKIE_HTTPONLY` | Sets `session.cookie_httponly` via `ini_set` before `session_start()`. Converted via `filter_var($value, FILTER_VALIDATE_BOOLEAN)`. |
+| `SESSION.COOKIE_SECURE` | Sets `session.cookie_secure` via `ini_set` before `session_start()`. Converted via `filter_var($value, FILTER_VALIDATE_BOOLEAN)`. |
+| `SESSION.USE_STRICT_MODE` | Sets `session.use_strict_mode` via `ini_set` before `session_start()`. Converted via `filter_var($value, FILTER_VALIDATE_BOOLEAN)`. |
 
 ## INI Allowlist
 
-Only the following PHP directives may be set through `PHP.INI`. Anything else is silently ignored:
+Only the following PHP directives may be set through `PHP.INI`. Anything else is logged via `error_log` and skipped:
 
 | Directive |
 | --- |
