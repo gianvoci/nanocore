@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2026-05-28] - docs(specs): align all specification docs with actual codebase behavior
+
+- Updated `specs/conventions-backend.md` with correct response methods, validation rules, CLI dispatch, session config, and security table
+- Updated `specs/conventions-database.md` with correct migration return values, rollback subdirectory, file naming regex
+- Updated `specs/file-structure.md` with current directory map and `.gitignore`/`.gitattributes` contents
+- Updated `specs/rules/config-management.md` to match actual `SESSION.*` config keys used by `sessionStart()`
+- Updated `specs/rules/error-handling.md` with response descriptor format and `sendResponse()` behavior
+- Updated `specs/rules/orm-usage.md` with migration API details (`migrateDir`, `rollbackDir`, `migrationStatus` returns)
+- Updated `specs/rules/route-registration.md` with CLI mode dispatch section
+- Updated `README.md` to remove stale `curl_close` reference and `backward compatible` label
+
+---
+
 ## [2026-05-28] - docs: rename migration guide to simplified filename
 
 - Renamed `MIGRATION-2.1.4-to-2.2.0.md` to `MIGRATION-to-2.2.0.md` for simpler naming

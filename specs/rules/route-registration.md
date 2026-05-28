@@ -40,6 +40,10 @@ Rules:
 11. On no match after all routes: `route.not_found` event emitted, `Exception('Route not found', 404)`.
 12. Path params take precedence: if a path param and query param share the same key, the path param value wins (`array_merge` with path params second).
 
+## CLI Mode
+
+When `php_sapi_name() === 'cli'` AND at least one command is registered (`!empty($this->commands)`), `run()` delegates to `runCli()` instead of processing HTTP routes. If in CLI mode with no commands registered, it falls through to HTTP route dispatch (useful for testing).
+
 ## Middleware
 
 ```php

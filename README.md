@@ -550,7 +550,7 @@ Features:
 - `CURLOPT_FOLLOWLOCATION` forced `false` for SSRF safety
 - Credentials stripped from logged URLs
 - Response body truncated to 500 chars in logs
-- Retry uses `curl_close`+`curl_init` instead of `curl_reset`
+- Retry reinitializes the curl handle between attempts (`curl_init`). CurlHandle objects are freed automatically.
 
 ### SSRF Validation (public)
 
@@ -597,7 +597,7 @@ $html = $app->renderHtml('templates/user.html', [
 ## Background Processes
 
 ```php
-// String mode (backward compatible)
+// String mode
 $app->execDetach('php process.php');
 
 // Array mode (safe — each argument is properly escaped)

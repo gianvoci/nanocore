@@ -46,11 +46,28 @@ Response format on error:
 
 | Descriptor type | Behavior |
 | --- | --- |
-| `json` | Sets `Content-Type: application/json`, HTTP status, encodes data |
-| `html` | Sets `Content-Type: text/html`, HTTP status, renders template |
-| `redirect` | Sets `Location` header, HTTP status (default 302) |
-| Empty return | 204 No Content |
-| Null with custom status | Status-only response (e.g. 304 Not Modified) |
+| `json` | Sets HTTP status, sends all headers from descriptor's `headers` array, echoes `json_encode($descriptor['body'], JSON_THROW_ON_ERROR)` |
+| `html` | Sets HTTP status, sends all headers from descriptor's `headers` array, echoes `$descriptor['body']` directly (no template rendering) |
+| `redirect` | Sets HTTP status, sends all headers from descriptor's `headers` array (includes `Location:`), no body output |
+| Status 204 or 304 | No body output, emits `response.sent` event and returns |
+
+## Response Descriptor Format
+
+All response methods (`json()`, `html()`, `redirect()`) return a descriptor array:
+
+```php
+[
+    '__nc_response' => true,
+    'type'          => 'json|html|redirect',
+    'body'          => mixed,   // data for json, content string for html, null for redirect
+    'status'        => int,     // HTTP status code
+    'headers'       => array,   // array of header strings (e.g. ['Content-Type: application/json'])
+]
+```
+
+- `json()` sets `body` to the data and `headers` to `['Content-Type: application/json', ...$customHeaders]`.
+- `html()` sets `body` to the content string and `headers` to `['Content-Type: text/html; charset=UTF-8', ...$customHeaders]`.
+- `redirect()` sets `body` to `null` and `headers` to `["Location: {$url}"]`.
 
 ## Handler Pattern
 
@@ -69,4 +86,4 @@ $app->addRoute('GET', '/users/@id', function ($app, $params) use ($pdo) {
 Key rules:
 - Always provide a valid HTTP status code (100–599) as the second argument.
 - Don't use codes outside 100–599 — NanoCore will default to 500.
-- `run()` returns the handler's return value — the consumer is responsible for echoing it. Return arrays/objects for JSON, strings for HTML.
+- `run()` returns the handler's return value for normal responses. If the handler returns a `__nc_response` descriptor, `run()` calls `sendResponse()` and returns `null`. If an exception is caught, `run()` outputs a JSON error and returns `null`.

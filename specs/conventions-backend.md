@@ -35,20 +35,20 @@
 
 - `addRoute` accepts mixed method/path and casts to string internally.
 - `curlRequest` is static — called as `NanoCore::curlRequest($url, $options)`.
-- `curlRequest` with `'with_info' => true` returns `['body'=>mixed,'status'=>int,'content_type'=>string|null]`. Without it, returns the body directly (backward compatible).
+- `curlRequest` with `'with_info' => true` returns `['body'=>mixed,'status'=>int,'content_type'=>string|null]`. Without it, returns the body directly.
 - `curlRequest` validates URLs before making requests: only `http`/`https` schemes allowed, private/restricted IPs are blocked (SSRF protection). IPv6 bracket stripping prevents bypass via `[::1]`-style addresses. `CURLOPT_FOLLOWLOCATION` is forced `false` to prevent redirect-based SSRF. Credentials are stripped from logged URLs. Body is truncated to 500 chars in logs.
-- `curlRequest` retries up to 5 times with linear backoff (100ms, 200ms, 300ms...) and resets the curl handle between attempts (`curl_close` + `curl_init`). On failure, throws a generic "External request failed" exception (no internal details leaked).
-- Magic properties via `__get`/`__set` on NanoCore instance: `$app->body` reads request body via `getBodyRequest()` with a 10MB default size limit (throws on overflow). The limit is customizable only via direct `getBodyRequest($maxBytes)` calls. An optional `$validateContentType` parameter (defaults to `false`) can enforce `application/json` Content-Type.
+- `curlRequest` makes up to 5 total attempts (initial + 4 retries) with linear backoff (100ms, 200ms, 300ms, 400ms) and reinitializes the curl handle on each retry via `curl_init()`. On failure, throws a generic "External request failed" exception (no internal details leaked).
+- Magic properties via `__get`/`__set` on NanoCore instance: `$app->body` reads request body via `getBodyRequest()` with a 10MB default size limit (throws on overflow). The limit is customizable only via direct `getBodyRequest($maxBytes)` calls. An optional `$validateContentType` parameter (defaults to `false`) can enforce `application/json` Content-Type. `$app->cli` returns `php_sapi_name() === 'cli'` (bool). `$app->anything_else` reads from the internal storage array (defaults to `null`).
 - `renderHtml` loads a template file and does string replacement from a data array. The path is validated to prevent traversal outside the project root. String values in `$data` are HTML-escaped by default (`$escape = true`); pass `false` to opt out.
-- `execDetach` runs a shell command in the background, logging output to `nanocore.log`. Accepts a string (backward compat) or an array of `[command, arg, arg, ...]` for proper argument escaping. `ob_flush()` is guarded — skips when no output buffer is active, preventing warnings. On Windows, uses `escapeshellcmd()` for command escaping; on other platforms, uses `exec()` with output redirection.
+- `execDetach` runs a shell command in the background, logging output to `nanocore.log`. Accepts a string or an array of `[command, arg, arg, ...]` for proper argument escaping. On Windows, array mode escapes each argument with `escapeshellarg()` then joins them; string mode uses `escapeshellcmd()`. Execution via `pclose(popen('start /B ' . $cmd, 'r'))`. On other platforms, array mode uses `escapeshellcmd()` for the program and `escapeshellarg()` for each argument; string mode uses `escapeshellcmd()`. Execution via `shell_exec()` with output redirection to `nanocore.log`. `ob_flush()` is guarded (skips when no output buffer is active), but `flush()` always runs.
 
 ## Response Methods
 
-- `json($data, $status = 200)` — returns a `__nc_response` descriptor: `['__nc_response' => true, 'type' => 'json', 'data' => $data, 'status' => $status]`.
-- `html($template, $data = [], $status = 200)` — returns a `__nc_response` descriptor with type `html`. Template is rendered via `renderHtml()`.
-- `redirect($url, $status = 302)` — returns a `__nc_response` descriptor with type `redirect`. CRLF injection is prevented: `\r` and `\n` are stripped from the URL.
+- `json(mixed $data, int $status = 200, array $headers = [])` — returns a `__nc_response` descriptor: `['__nc_response' => true, 'type' => 'json', 'body' => $data, 'status' => $status, 'headers' => ['Content-Type: application/json', ...$headers]]`.
+- `html(string $content, int $status = 200, array $headers = [])` — returns a `__nc_response` descriptor: `['__nc_response' => true, 'type' => 'html', 'body' => $content, 'status' => $status, 'headers' => ['Content-Type: text/html; charset=UTF-8', ...$headers]]`. Note: `html()` takes raw content, NOT a template path. Template rendering is a separate `renderHtml()` method.
+- `redirect(string $url, int $status = 302)` — returns a `__nc_response` descriptor: `['__nc_response' => true, 'type' => 'redirect', 'body' => null, 'status' => $status, 'headers' => ["Location: {$url}"]]`. CRLF injection is prevented: `\r` and `\n` are stripped from the URL.
 - `run()` detects `__nc_response` descriptors in handler return values and delegates to `sendResponse()` (private), which sets headers and outputs the body.
-- `sendResponse()` handles: `json` (sets `Content-Type: application/json`, encodes data), `html` (sets `Content-Type: text/html`, renders template), `redirect` (sets `Location` header), empty return (204 No Content), null return with custom status (e.g. 304 Not Modified).
+- `sendResponse()` handles: reads `headers` from the descriptor and calls `header()` for each. `json` (encodes body as JSON), `html` (echoes `$descriptor['body']` directly — no template rendering), `redirect` (sets `Location` header), empty return (204 No Content), null return with custom status (e.g. 304 Not Modified). For 204 and 304 status codes, no body is output.
 
 ## Middleware
 
@@ -63,10 +63,11 @@
 - `validate(array $data, array $rules)` — validates data against rules. Throws `\Exception` with HTTP 422 on failure. Returns validated data on success.
 - `check(array $data, array $rules)` — validates data against rules. Returns `['valid' => bool, 'errors' => array, 'data' => array]`. Does not throw.
 - `check()` skips absent optional fields — if a field is not present and not `required`, it is not validated.
-- 10 built-in rules: `required`, `string`, `int`, `float`, `bool`, `email`, `url`, `min`, `max`, `regex`.
+- 10 built-in rules: `required`, `integer`, `numeric`, `string`, `min`, `max`, `email`, `url`, `regex`, `in`.
 - Rule syntax: `'fieldname' => 'required|email'` (pipe-separated) or `'fieldname' => ['required', 'min:5']` (array).
-- `parseRule('min:5')` → `['rule' => 'min', 'param' => '5']`.
-- ⚠️ The `regex` rule uses `/` as the delimiter. If your pattern contains `/`, escape it or use a different delimiter in your regex and wrap the whole thing: `regex:/pattern/`.
+- `in` — value must be in a comma-separated allow-list. Syntax: `'fieldname' => 'in:admin,user,guest'`.
+- `parseRule('min:5')` → `['name' => 'min', 'param' => '5']`.
+- The `regex` rule auto-wraps the pattern in `/` delimiters. Do NOT include delimiters in the param. Example: `regex:^/api/` becomes `/^/api//` internally. If the pattern is invalid, validation throws `InvalidArgumentException`.
 
 ## Events
 
@@ -80,14 +81,14 @@
 
 ## CLI Commands
 
-- `addCommand(string $name, callable $handler)` — registers a CLI command.
+- `addCommand(string $name, callable $handler)` — registers a CLI command. Command names are validated against `/^[a-zA-Z0-9:_-]+$/`. Invalid names throw `InvalidArgumentException`.
 - `runCli()` — dispatches CLI commands based on `$_SERVER['argv']`.
-- `run()` checks `php_sapi_name() === 'cli'` at the top and delegates to `runCli()` if in CLI mode.
+- `run()` checks `php_sapi_name() === 'cli' && !empty($this->commands)` and delegates to `runCli()` if both conditions are true. If in CLI mode with no commands registered, it falls through to HTTP route dispatch.
 - CLI commands receive `($app, $args)` where `$args` is the argv array.
 
 ## Sessions
 
-- `sessionStart()` — idempotent session start. Reads `SESSION.*` config keys before starting. Does nothing if session is already active.
+- `sessionStart()` — idempotent session start. Reads these config keys before starting: `SESSION.COOKIE_HTTPONLY` → sets `session.cookie_httponly` via `ini_set`, `SESSION.COOKIE_SECURE` → sets `session.cookie_secure` via `ini_set`, `SESSION.USE_STRICT_MODE` → sets `session.use_strict_mode` via `ini_set`. Does nothing if session is already active.
 - `sessionGet(string $key, $default = null)` — reads a session value.
 - `sessionSet(string $key, $value)` — writes a session value.
 - `sessionDestroy()` — destroys the session. Guards for active session before calling `session_destroy()`.
@@ -103,7 +104,7 @@ Built-in protections across the library:
 | XSS | `renderHtml` | String values are HTML-escaped by default (`$escape = true`; opt-out via `false`) |
 | CRLF injection | `redirect` | `\r` and `\n` stripped from redirect URLs |
 | SQL injection | NanoORM | Identifier validation (`/^[a-zA-Z_][a-zA-Z0-9_]*$/`); parameterized queries via PDO prepared statements |
-| Config tampering | `configSet` | Protected keys (`PHP.INI`, `CORE`) throw on write; atomic file writes (temp + rename); internal double quotes escaped in `saveConfig()` |
+| Config tampering | `configSet` | Protected top-level keys (`PHP.INI`, `CORE`) throw on write — the check uses `explode('.', $prop)[0]` so nested keys like `PHP.INI.display_errors` are also protected; atomic file writes (temp + rename); internal double quotes escaped in `saveConfig()` |
 | Command injection | `execDetach` | Array mode escapes each argument with `escapeshellarg()`; Windows support with `escapeshellcmd()` |
 | Arbitrary `ini_set` | Constructor | Only directives in `ALLOWED_INI_SETTINGS` are applied; unknown ones are silently skipped |
 | Credential leaking | `curlRequest` logs | Credentials stripped from logged URLs; body truncated to 500 chars in logs |

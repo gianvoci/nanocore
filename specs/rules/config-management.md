@@ -70,13 +70,9 @@ Attempting `configSet('PHP.INI.display_errors', '1')` will throw an exception.
 | --- | --- |
 | `CORE.ROOT` | Set automatically by the constructor to the detected base path. Do not set manually. |
 | `PHP.INI` | Group of `ini_set` key-value pairs. Only allowed directives are applied (see `ALLOWED_INI_SETTINGS` constant in NanoCore.php). Unknown directives are silently skipped. |
-| `SESSION.AUTO_START` | Whether to auto-start sessions. Read by `sessionStart()`. |
-| `SESSION.NAME` | Session name. Read by `sessionStart()`. |
-| `SESSION.LIFETIME` | Session cookie lifetime. Read by `sessionStart()`. |
-| `SESSION.PATH` | Session cookie path. Read by `sessionStart()`. |
-| `SESSION.DOMAIN` | Session cookie domain. Read by `sessionStart()`. |
-| `SESSION.SECURE` | Whether to send session cookie only over HTTPS. Read by `sessionStart()`. |
-| `SESSION.HTTPONLY` | Whether to make session cookie HTTP-only. Read by `sessionStart()`. |
+| `SESSION.COOKIE_HTTPONLY` | Sets `session.cookie_httponly` via `ini_set` before `session_start()`. Cast to bool then int. |
+| `SESSION.COOKIE_SECURE` | Sets `session.cookie_secure` via `ini_set` before `session_start()`. Cast to bool then int. |
+| `SESSION.USE_STRICT_MODE` | Sets `session.use_strict_mode` via `ini_set` before `session_start()`. Cast to bool then int. |
 
 ## INI Allowlist
 

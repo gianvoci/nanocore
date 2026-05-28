@@ -87,10 +87,10 @@ $orm->addJoin('table', 'localKey', 'foreignKey', 'INNER|LEFT|RIGHT|FULL|CROSS', 
 
 ## Migrations
 
-- `migrateDir(string $dir, PDO $pdo)` — static method. Runs all `.sql` files in `$dir` that haven't been applied yet, in alphabetical order.
-- `rollbackDir(string $dir, PDO $pdo)` — static method. Rolls back the most recently applied migration by running the corresponding `.sql` file again (down migration).
-- `migrationStatus(string $dir, PDO $pdo)` — static method. Returns array of all migrations with their applied status.
-- File naming format: `YYYY_MM_DD_HH_MM_SS_name.sql` (e.g., `2025_01_15_10_30_00_create_users.sql`). Invalid file names throw `InvalidArgumentException`.
+- `migrateDir(string $dir, PDO $pdo)` — static method. Runs all `.sql` files in `$dir` that haven't been applied yet, in alphabetical order. Returns `array` — list of newly applied migration file names.
+- `rollbackDir(string $dir, PDO $pdo, int $steps = 1)` — static method. Rolls back the most recently applied migrations by executing rollback SQL files. Accepts an optional `$steps` parameter (default 1) to roll back multiple migrations. Rollback files must exist in `$dir/rollback/` subdirectory with the same filename as the original migration. Returns `array` — list of rolled-back migration file names.
+- `migrationStatus(string $dir, PDO $pdo)` — static method. Returns `['applied' => [...], 'pending' => [...]]` — two arrays of migration file names.
+- File naming: must match `/^\d+_[a-zA-Z0-9_]+\.sql$/` — a numeric prefix followed by underscore and alphanumeric/underscore name. Convention is `YYYY_MM_DD_HH_MM_SS_name.sql` (e.g., `2025_01_15_10_30_00_create_users.sql`), but any numeric prefix is accepted. Invalid file names throw `InvalidArgumentException`.
 - Driver detection: checks `PDO::ATTR_DRIVER_NAME` — uses `SQLite` or `MySQL` dialect for the migrations table.
 - `ensureMigrationsTable(PDO $pdo)` — private static method. Creates the `nanocore_migrations` table if it doesn't exist.
-- `executeSqlFile(PDO $pdo, string $path)` — private static method. Reads and executes a `.sql` file.
+- `executeSqlFile(PDO $pdo, string $path)` — private static method. Takes a SQL content string (not a file path). For SQLite: executes each statement individually without transaction wrapping. For other drivers: wraps all statements in a transaction (commit on success, rollback on failure).

@@ -144,17 +144,24 @@ $orm->transaction(function () use ($orm) {
 ## Migrations
 
 ```php
-// Run all pending migrations
+// Run all pending migrations — returns array of newly applied migration file names
 NanoORM::migrateDir('/path/to/migrations', $pdo);
 
-// Roll back the last migration
-NanoORM::rollbackDir('/path/to/migrations', $pdo);
+// Roll back the last N migrations (default: 1)
+NanoORM::rollbackDir('/path/to/migrations', $pdo, steps: 2);
+
+// Rollback files must exist in $dir/rollback/ subdirectory
+// e.g., $dir/rollback/2025_01_15_10_30_00_create_users.sql
 
 // Check migration status
 $status = NanoORM::migrationStatus('/path/to/migrations', $pdo);
-// Returns array of ['file' => '...', 'applied' => bool]
+// Returns ['applied' => [...], 'pending' => [...]] — two arrays of migration file names
 ```
 
-- File naming: `YYYY_MM_DD_HH_MM_SS_name.sql` (e.g., `2025_01_15_10_30_00_create_users.sql`).
+- File naming: must match `/^\d+_[a-zA-Z0-9_]+\.sql$/` — a numeric prefix followed by underscore and alphanumeric/underscore name. Convention is `YYYY_MM_DD_HH_MM_SS_name.sql` (e.g., `2025_01_15_10_30_00_create_users.sql`), but any numeric prefix is accepted.
 - Invalid file names throw `InvalidArgumentException`.
+- `migrateDir` returns `array` — list of newly applied migration file names.
+- `rollbackDir` accepts an optional `$steps` parameter (default 1) to roll back multiple migrations. Rollback SQL files must exist in `$migrationsDir/rollback/` subdirectory with the same filename as the original migration. Returns `array` — list of rolled-back migration file names.
+- `migrationStatus` returns `['applied' => [...], 'pending' => [...]]` — two arrays of migration file names.
+- `executeSqlFile` is a private static method. Takes a SQL content string (not a file path). For SQLite: executes each statement individually without transaction wrapping. For other drivers: wraps all statements in a transaction (commit on success, rollback on failure).
 - Driver detection: checks `PDO::ATTR_DRIVER_NAME` for SQLite vs MySQL dialect.
