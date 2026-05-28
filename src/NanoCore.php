@@ -1177,7 +1177,6 @@ class NanoCore
         for ($retry = 0; $retry < 5; $retry++) {
             if ($retry > 0) {
                 usleep(100000 * $retry);
-                curl_close($ch);
                 $ch = curl_init();
                 curl_setopt_array($ch, $curlopt);
             }
@@ -1195,15 +1194,6 @@ class NanoCore
         $contentType = curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
         if ($contentType === false) {
             $contentType = null;
-        }
-        // Explicit cleanup — E_DEPRECATED from PHP 8.5 gets converted to ErrorException
-        // by our custom error handler; safe to swallow since curl_close is a no-op since 8.0
-        try {
-            curl_close($ch);
-        } catch (\ErrorException $e) {
-            if ($e->getSeverity() !== E_DEPRECATED) {
-                throw $e;
-            }
         }
 
         // Log the request

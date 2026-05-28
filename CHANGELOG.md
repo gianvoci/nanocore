@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2026-05-28] - refactor(core): remove deprecated curl_close() calls for PHP 8.5
+
+- Removed `curl_close()` calls from `curlRequest()` — no-op since PHP 8.0, emits deprecation warnings in PHP 8.5
+
+---
+
 ## [2.2.0] - 2026-05-26
 
 ### Added
@@ -72,7 +78,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 ### Fixed
 
 - Used `array_replace` instead of `array_merge` for CURLOPT merging — `array_merge` reindexes integer keys, destroying CURLOPT constants
-- Added `curl_close()` after request completion to prevent resource leaks
+- Added `curl_close()` after request completion to prevent resource leaks (later removed in PHP 8.5 deprecation cleanup)
 - Used `dirname($this->configFile)` for log path instead of URL basePath
 
 ## [2.0.0] - 2026-04-18
