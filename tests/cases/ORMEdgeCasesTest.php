@@ -150,17 +150,20 @@ $tests[] = function () {
     assertTrue($result === $user, 'fill() should return self for chaining');
 };
 
-// Test 8: fill() silently ignores non-schema fields
+// Test 8: fill() throws on non-schema fields
 $tests[] = function () {
     $pdo = createMemoryPDO();
     prepareSchema($pdo);
 
     $user = new NanoORM($pdo, 'users');
-    $user->fill(['name' => 'Test', 'nonexistent' => 'ignored']);
 
-    $arr = $user->toArray();
-    assertEquals('Test', $arr['name'], 'Schema field should be set');
-    assertTrue(!array_key_exists('nonexistent', $arr), 'Non-schema field should be silently ignored');
+    assertThrows(
+        \InvalidArgumentException::class,
+        '',
+        function () use ($user) {
+            $user->fill(['name' => 'Test', 'nonexistent' => 'ignored']);
+        }
+    );
 };
 
 // Test 9: isNew() returns true before save, false after

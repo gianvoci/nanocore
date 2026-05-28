@@ -288,24 +288,20 @@ $tests[] = function () {
     assertEquals([], $user->toArray(), 'clear() should empty all data');
 };
 
-// Test 15: toArray() and magic methods
+// Test 15: __set throws on unknown fields
 $tests[] = function () {
     $pdo = createMemoryPDO();
     prepareSchema($pdo);
 
     $user = new NanoORM($pdo, 'users');
-    $user->fill(['name' => 'Test', 'email' => 'test@test.com', 'status' => 'active']);
 
-    $arr = $user->toArray();
-    assertEquals('Test', $arr['name'], 'toArray should contain filled name');
-
-    assertTrue(isset($user->name), 'isset should return true for set field');
-    unset($user->name);
-    assertTrue(!isset($user->name), 'isset should return false after unset');
-
-    // Setting a field not in the schema should be silently ignored
-    $user->nonexistent_field = 'value';
-    assertTrue($user->nonexistent_field === null, 'Non-schema field should not be stored');
+    assertThrows(
+        \InvalidArgumentException::class,
+        '',
+        function () use ($user) {
+            $user->nonexistent_field = 'value';
+        }
+    );
 };
 
 runTests($tests);

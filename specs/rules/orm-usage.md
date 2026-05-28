@@ -90,7 +90,7 @@ unset($orm->name);   // __unset — remove field from data
 
 ## Important Notes
 
-- `__set` silently drops fields not in the discovered schema — no error, no exception.
+- `__set` throws `\InvalidArgumentException` for fields not in the discovered schema — both direct assignment and `fill()` reject unknown fields.
 - `findById`, `findBy`, and `findAll` all return cloned instances — modifying one does not affect others.
 - `fetchWithJoins` returns raw arrays, not ORM instances.
 - `save()` decides insert vs update based on `isNew` flag, not PK presence.
@@ -116,6 +116,7 @@ $result = $orm->paginate(page: 1, perPage: 10, conditions: ['published' => 1], o
 
 - `$page` and `$perPage` must be >= 1 (throws `InvalidArgumentException` otherwise).
 - `last_page` is always >= 1 (even with zero results).
+- Throws `\Exception` if JOINs are registered — paginate does not support joined queries.
 
 ## Transactions
 
@@ -163,5 +164,5 @@ $status = NanoORM::migrationStatus('/path/to/migrations', $pdo);
 - `migrateDir` returns `array` — list of newly applied migration file names.
 - `rollbackDir` accepts an optional `$steps` parameter (default 1) to roll back multiple migrations. Rollback SQL files must exist in `$migrationsDir/rollback/` subdirectory with the same filename as the original migration. Returns `array` — list of rolled-back migration file names.
 - `migrationStatus` returns `['applied' => [...], 'pending' => [...]]` — two arrays of migration file names.
-- `executeSqlFile` is a private static method. Takes a SQL content string (not a file path). For SQLite: executes each statement individually without transaction wrapping. For other drivers: wraps all statements in a transaction (commit on success, rollback on failure).
+- `executeSqlFile` is a private static method. Takes a SQL content string (not a file path). Uses naive splitting on `;` — does not handle semicolons inside string literals or comments. For SQLite: executes each statement individually without transaction wrapping. For other drivers: wraps all statements in a transaction (commit on success, rollback on failure).
 - Driver detection: checks `PDO::ATTR_DRIVER_NAME` for SQLite vs MySQL dialect.

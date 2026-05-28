@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 /**
  * NanoORM - A lightweight ORM for database operations
  *
@@ -64,7 +66,7 @@ class NanoORM
     {
         try {
             // Table name validated in constructor via validateIdentifier()
-            $stmt = $this->pdo->query("DESCRIBE {$this->table}");
+            $stmt = $this->pdo->query("DESCRIBE `{$this->table}`");
             $columns = $stmt->fetchAll(\PDO::FETCH_ASSOC);
             foreach ($columns as $column) {
                 $this->fields[] = $column['Field'];
@@ -103,9 +105,10 @@ class NanoORM
      */
     public function __set(string $name, mixed $value): void
     {
-        if (in_array($name, $this->fields) || $name === $this->primaryKey) {
-            $this->data[$name] = $value;
+        if (!in_array($name, $this->fields) && $name !== $this->primaryKey) {
+            throw new \InvalidArgumentException("Unknown field: {$name}");
         }
+        $this->data[$name] = $value;
     }
 
     /**
@@ -161,7 +164,7 @@ class NanoORM
      */
     public function findById(mixed $id): ?self
     {
-        $stmt = $this->pdo->prepare("SELECT * FROM {$this->table} WHERE {$this->primaryKey} = :id LIMIT 1");
+        $stmt = $this->pdo->prepare("SELECT * FROM `{$this->table}` WHERE `{$this->primaryKey}` = :id LIMIT 1");
         $stmt->execute([':id' => $id]);
         $row = $stmt->fetch(\PDO::FETCH_ASSOC);
 
@@ -185,7 +188,7 @@ class NanoORM
     {
         $field = $this->validateFieldName($field);
 
-        $sql = "SELECT * FROM {$this->table} WHERE {$field} = :value";
+        $sql = "SELECT * FROM `{$this->table}` WHERE {$field} = :value";
         if ($limit !== null) {
             // $limit is int type-hinted, safe to interpolate
             $sql .= " LIMIT {$limit}";
@@ -197,6 +200,9 @@ class NanoORM
 
         $results = [];
         foreach ($rows as $row) {
+            // Note: Each result is a cloned instance — large result sets will consume
+            // significant memory. For bulk operations, consider using fetchWithJoins()
+            // or raw PDO queries.
             $results[] = (clone $this)->hydrate($row);
         }
 
@@ -267,14 +273,14 @@ class NanoORM
         string $type = 'INNER',
         array $selectFields = ['*']
     ): self {
-        $this->validateFieldName($table);
+        $this->validateIdentifier($table, 'join table');
         $this->validateFieldName($localKey);
         $this->validateFieldName($foreignKey);
 
         // Validate select fields to prevent SQL injection ('*' is a valid wildcard)
         foreach ($selectFields as $field) {
             if ($field !== '*') {
-                $this->validateFieldName($field, 'join select field');
+                $this->validateFieldName($field);
             }
         }
 
@@ -327,8 +333,9 @@ class NanoORM
      */
     protected function buildSelectQuery(): string
     {
+        // Join aliases use j0_, j1_, ... prefix to avoid collisions with main table fields
         $mainFields = array_map(function ($field) {
-            return "{$this->table}.{$field}";
+            return "`{$this->table}`.`{$field}`";
         }, $this->fields);
 
         $joinClauses = [];
@@ -344,10 +351,10 @@ class NanoORM
             }, $join['fields']);
             $selectFields = array_merge($selectFields, $joinFields);
 
-            $joinClauses[] = "{$join['type']} JOIN {$join['table']} AS {$joinAlias} ON {$this->table}.{$join['localKey']} = {$joinAlias}.{$join['foreignKey']}";
+            $joinClauses[] = "{$join['type']} JOIN `{$join['table']}` AS `{$joinAlias}` ON `{$this->table}`.`{$join['localKey']}` = `{$joinAlias}`.`{$join['foreignKey']}`";
         }
 
-        $sql = "SELECT " . implode(', ', $selectFields) . " FROM {$this->table}";
+        $sql = "SELECT " . implode(', ', $selectFields) . " FROM `{$this->table}`";
         if (!empty($joinClauses)) {
             $sql .= " " . implode(" ", $joinClauses);
         }
@@ -388,7 +395,7 @@ class NanoORM
             return ":{$field}";
         }, $fields);
 
-        $sql = "INSERT INTO {$this->table} (" . implode(', ', $quotedFields) . ") VALUES (" . implode(', ', $placeholders) . ")";
+        $sql = "INSERT INTO `{$this->table}` (" . implode(', ', $quotedFields) . ") VALUES (" . implode(', ', $placeholders) . ")";
 
         $stmt = $this->pdo->prepare($sql);
         $result = $stmt->execute($data);
@@ -420,7 +427,7 @@ class NanoORM
             return "`{$field}` = :{$field}";
         }, array_keys($data));
 
-        $sql = "UPDATE {$this->table} SET " . implode(', ', $sets) . " WHERE {$this->primaryKey} = :{$this->primaryKey}";
+        $sql = "UPDATE `{$this->table}` SET " . implode(', ', $sets) . " WHERE `{$this->primaryKey}` = :{$this->primaryKey}";
         $data[$this->primaryKey] = $id;
 
         $stmt = $this->pdo->prepare($sql);
@@ -439,7 +446,7 @@ class NanoORM
             throw new \Exception("Cannot delete record without primary key");
         }
 
-        $sql = "DELETE FROM {$this->table} WHERE {$this->primaryKey} = :{$this->primaryKey}";
+        $sql = "DELETE FROM `{$this->table}` WHERE `{$this->primaryKey}` = :{$this->primaryKey}";
         $stmt = $this->pdo->prepare($sql);
         $result = $stmt->execute([":{$this->primaryKey}" => $this->data[$this->primaryKey]]);
 
@@ -471,7 +478,7 @@ class NanoORM
             $params[":{$field}"] = $value;
         }
 
-        $sql = "DELETE FROM {$this->table} WHERE " . implode(' AND ', $whereClauses);
+        $sql = "DELETE FROM `{$this->table}` WHERE " . implode(' AND ', $whereClauses);
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute($params);
 
@@ -615,6 +622,9 @@ class NanoORM
         if ($perPage < 1) {
             throw new \InvalidArgumentException('Per page must be >= 1');
         }
+        if (!empty($this->joins)) {
+            throw new \Exception("Paginate does not support joined queries");
+        }
 
         $offset = ($page - 1) * $perPage;
 
@@ -632,13 +642,13 @@ class NanoORM
         }
 
         // COUNT query
-        $countSql = "SELECT COUNT(*) as total FROM {$this->table}{$whereSql}";
+        $countSql = "SELECT COUNT(*) as total FROM `{$this->table}`{$whereSql}";
         $stmt = $this->pdo->prepare($countSql);
         $stmt->execute($params);
-        $total = (int) $stmt->fetch(\PDO::FETCH_ASSOC)['total'];
+        $total = (int) ($stmt->fetch(\PDO::FETCH_ASSOC)['total'] ?? 0);
 
         // SELECT query
-        $selectSql = "SELECT * FROM {$this->table}{$whereSql}";
+        $selectSql = "SELECT * FROM `{$this->table}`{$whereSql}";
 
         if ($orderBy !== '') {
             $orderBy = $this->sanitizeOrderBy($orderBy);
@@ -760,13 +770,16 @@ class NanoORM
 
         sort($files);
 
+        $appliedLookup = array_flip($appliedNames);
+
         $newlyApplied = [];
         foreach ($files as $fileName) {
-            if (in_array($fileName, $appliedNames, true)) {
+            if (isset($appliedLookup[$fileName])) {
                 continue;
             }
 
-            $content = file_get_contents($migrationsDir . '/' . $fileName);
+            $migrationFilePath = rtrim($migrationsDir, '\\/') . '/' . $fileName;
+            $content = file_get_contents($migrationFilePath);
             self::executeSqlFile($pdo, $content);
 
             $stmt = $pdo->prepare("INSERT INTO migrations (name, applied_at) VALUES (:name, :appliedAt)");
@@ -805,7 +818,11 @@ class NanoORM
 
         $rolledBack = [];
         foreach ($toRollback as $name) {
-            $rollbackPath = $migrationsDir . '/rollback/' . $name;
+            if (!preg_match('/^\d+_[a-zA-Z0-9_]+\.sql$/', $name)) {
+                throw new \InvalidArgumentException("Invalid migration file name: {$name}");
+            }
+
+            $rollbackPath = rtrim($migrationsDir, '\\/') . '/rollback/' . $name;
 
             if (!file_exists($rollbackPath)) {
                 throw new \Exception("No rollback file found for {$name}");
@@ -879,6 +896,10 @@ class NanoORM
 
     /**
      * Execute SQL content split by semicolons.
+     * NOTE: This uses naive splitting on ';' — it does not handle semicolons
+     * inside string literals or comments. Ensure migration SQL does not contain
+     * literal semicolons in data values.
+     *
      * For SQLite: executes each statement individually (no transaction, DDL not supported).
      * For other drivers: wraps all statements in a transaction.
      *
