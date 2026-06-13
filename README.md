@@ -6,7 +6,7 @@ A lightweight PHP micro-framework with routing, config management, a micro ORM, 
 
 - Pattern-based routing with path parameters and wildcards
 - Response methods: `json()`, `html()`, `redirect()`
-- Middleware pipeline with `$next` chaining
+- Middleware pipeline with `$next` chaining, route and method passed to callbacks
 - Input validation with 10 built-in rules
 - Event system with built-in lifecycle events
 - CLI command registration and auto-detection
@@ -14,7 +14,7 @@ A lightweight PHP micro-framework with routing, config management, a micro ORM, 
 - Env-based config management with dot-notation access
 - NanoORM: lightweight ORM with CRUD, joins, pagination, transactions, migrations
 - HTTP client with retry and SSRF protection
-- Request body parser with size limit
+- Request body parser with size limit, cache, and Content-Type auto-detect
 - HTML template rendering with XSS protection
 - Background process execution
 - Built-in error handling (JSON responses)
@@ -149,7 +149,10 @@ Returning a plain array still works — auto-encoded as JSON with status 200.
 
 ```php
 // First registered = first executed
-$app->addMiddleware(function ($app, $params, $next) {
+$app->addMiddleware(function ($app, $params, $next, $route, $method) {
+    // $route = resolved path (e.g. '/api/auth/login')
+    // $method = HTTP method (e.g. 'POST')
+    
     // Before handler
     $response = $next($app, $params);
     // After handler
@@ -159,7 +162,7 @@ $app->addMiddleware(function ($app, $params, $next) {
 
 - Middleware wraps handlers in reverse order (last registered = innermost)
 - `$next` continues the chain to the next middleware or the route handler
-- Return value flows back through the middleware stack
+- `$route` and `$method` are passed as additional parameters — middleware that doesn't use them still works
 
 ## Input Validation
 
@@ -358,9 +361,11 @@ $user = (new NanoORM($pdo, 'users'))->findById(1);
 echo $user->name;     // Magic getter
 echo $user->email;
 
-$actives = (new NanoORM($pdo, 'users'))->findBy('status', 'active', 10);
+// findBy/findAll return associative arrays, not ORM instances
+$actives = (new NanoORM($pdo, 'users'))->findBy('status = ?', ['active'], 10);
 $recent = (new NanoORM($pdo, 'posts'))->findAll(
-    ['published' => 1],
+    'published = ?',
+    [1],
     'created_at DESC',
     10
 );
@@ -381,15 +386,15 @@ $user = (new NanoORM($pdo, 'users'))->findById(1);
 $user->delete();
 
 // Batch delete
-(new NanoORM($pdo, 'users'))->deleteWhere(['status' => 'inactive']);
+(new NanoORM($pdo, 'users'))->deleteWhere('status = ?', ['inactive']);
 ```
 
 ### Pagination
 
 ```php
-$result = (new NanoORM($pdo, 'users'))->paginate(1, 25, ['status' => 'active'], 'name ASC');
+$result = (new NanoORM($pdo, 'users'))->paginate(1, 25, 'status = ?', ['active'], 'name ASC');
 // $result = [
-//     'data'     => [...],
+//     'data'     => [...],  // associative arrays
 //     'total'    => 142,
 //     'page'     => 1,
 //     'per_page' => 25,
@@ -449,7 +454,7 @@ $orders
     ->addJoin('users', 'user_id', 'id', 'INNER', ['name', 'email'])
     ->addJoin('products', 'product_id', 'id', 'LEFT', ['title', 'price']);
 
-$rows = $orders->fetchWithJoins(['status' => 'completed']);
+$rows = $orders->fetchWithJoins('status = ?', ['completed']);
 // $rows = [
 //     ['id' => 1, 'status' => 'completed', 'j0_name' => 'Jane', 'j1_title' => 'Widget', ...],
 //     ...
@@ -465,11 +470,11 @@ Join types: `INNER`, `LEFT`, `RIGHT`, `FULL`, `CROSS`.
 | `fill(array $data)` | `self` | Set multiple fields at once |
 | `save()` | `bool` | Insert (new) or update (existing) |
 | `delete()` | `bool` | Delete current record by PK |
-| `deleteWhere(array $conds)` | `int` | Delete matching records, returns affected rows |
+| `deleteWhere($where, $params)` | `int` | Delete matching records with WHERE clause, returns affected rows |
 | `findById($id)` | `self\|null` | Find by primary key |
-| `findBy($field, $value, $limit)` | `array` | Find by field value |
-| `findAll($conds, $orderBy, $limit)` | `array` | Find with conditions, order, limit |
-| `paginate($page, $perPage, $conds, $orderBy)` | `array` | Paginated results with metadata |
+| `findBy($where, $params, $limit)` | `array<array>` | Find with WHERE clause, returns associative arrays |
+| `findAll($where, $params, $orderBy, $limit)` | `array<array>` | Find with WHERE, order, limit — returns associative arrays |
+| `paginate($page, $perPage, $where, $params, $orderBy)` | `array` | Paginated results with metadata |
 | `addJoin($table, $local, $foreign, $type, $fields)` | `self` | Register a JOIN |
 | `fetchWithJoins($conds)` | `array` | Execute query with registered JOINs |
 | `beginTransaction()` | `void` | Start a transaction |
@@ -477,6 +482,7 @@ Join types: `INNER`, `LEFT`, `RIGHT`, `FULL`, `CROSS`.
 | `rollback()` | `void` | Rollback current transaction |
 | `transaction(callable)` | `mixed` | Run callable with auto-rollback on `\Throwable` |
 | `toArray()` | `array` | Get all field data |
+| `fromArray(array $row)` | `self` | Hydrate from associative array (validates fields) |
 | `clear()` | `self` | Reset data, joins, and isNew state (preserves schema) |
 | `getId()` | `mixed` | Get primary key value |
 | `isNew()` | `bool` | Check if record is unsaved |
@@ -569,7 +575,10 @@ IPv6 bracket stripping blocks `[::1]`, `[::ffff:127.0.0.1]` and similar loopback
 ```php
 // In a route handler:
 $app->addRoute('POST', '/users', function ($app, $params) {
-    $body = $app->body;  // Shorthand — reads and JSON-decodes the request body
+    $body = $app->body;  // Shorthand — reads and decodes the request body
+
+    // Body is cached — subsequent calls return the same result
+    // Auto-detects Content-Type: JSON, form-urlencoded, multipart/form-data
 
     // Or with options:
     $body = $app->getBodyRequest(10_485_760, true);  // 10MB limit, enforce JSON Content-Type
@@ -580,6 +589,15 @@ $app->addRoute('POST', '/users', function ($app, $params) {
 ```
 
 Default size limit: 10MB. Throws if exceeded.
+
+### Content-Type Auto-Detection
+
+| Content-Type | Result |
+| --- | --- |
+| `application/json` | JSON-decoded array |
+| `application/x-www-form-urlencoded` | `parse_str` result |
+| `multipart/form-data` | `$_POST` |
+| Other / absent | Try JSON, fallback to raw string |
 
 ## HTML Rendering
 
@@ -611,11 +629,17 @@ Windows support via `escapeshellcmd()`.
 ## Magic Properties
 
 ```php
-$app->body;    // → reads request body (JSON decoded)
+$app->body;    // → reads request body (cached, auto-detects Content-Type)
 $app->cli;     // → true if running in CLI mode
 
 $app->myVar = 'hello';  // → store custom data
 echo $app->myVar;        // → 'hello'
+
+// Fail-fast property access — throws RuntimeException if not configured
+$pdo = $app->require('pdo');        // Returns stored value
+$body = $app->require('body');      // Returns parsed body (virtual property)
+$cli = $app->require('cli');        // Returns bool (virtual property)
+$app->require('nonexistent');       // → RuntimeException
 ```
 
 ## Security
@@ -627,7 +651,7 @@ NanoCore has security protections built in:
 | **SSRF Prevention** | `curlRequest`, `validateUrlNotRestricted`, `validateIpNotRestricted` | Only http/https URLs. Blocks private IPs, localhost, restricted ranges, IPv6 brackets. DNS resolution checked. `FOLLOWLOCATION` disabled. |
 | **CRLF Injection** | `redirect()` | CR/LF characters stripped from redirect URLs |
 | **Path Traversal** | `renderHtml()` | `DIRECTORY_SEPARATOR` appended to root path prevents traversal |
-| **SQL Injection** | NanoORM | All identifiers validated. Field names backtick-quoted in queries. PDO prepared statements for all values. |
+| **SQL Injection** | NanoORM | All identifiers validated. Field names backtick-quoted in queries. PDO prepared statements for all values. Note: `findBy()`/`findAll()`/`deleteWhere()` accept arbitrary WHERE — caller must ensure safe SQL. |
 | **XSS Prevention** | `renderHtml` | HTML-escaping enabled by default. Path traversal blocked. |
 | **Config Tampering** | `configSet` | Protected keys (`PHP.INI`, `CORE`) cannot be modified. Atomic file writes. Internal double quotes escaped in `saveConfig()`. |
 | **Command Injection** | `execDetach` | Array mode escapes each argument independently. Windows support with `escapeshellcmd()`. |

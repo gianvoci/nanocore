@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2026-06-13] - docs: update README and file structure for v2.3.0
+
+- Updated README.md with new ORM API signatures (findBy/findAll/paginate/deleteWhere), middleware route/method params, body cache, Content-Type auto-detect, require() example, execDetach Windows fix
+- Updated specs/file-structure.md with NewFeaturesTest.php entry and updated NanoCore/NanoORM descriptions
+- Security table updated for ORM arbitrary WHERE clause note
+
+---
+
 ## [2026-06-13] - docs: add migration guide for v2.3.0
 
 - Added `MIGRATION-to-2.3.0.md` documenting all breaking changes: new findBy/findAll signatures, paginate API change, hydrate→fromArray rename, deleteWhere safety guard, middleware route/method params, body cache, require(), execDetach fix
