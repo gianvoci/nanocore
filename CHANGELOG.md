@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2026-06-13] - chore: add AGENTS.md to export-ignore
+
+- Added `/AGENTS.md` to `.gitattributes` export-ignore list for Packagist distribution
+
+---
+
 ## [2026-06-13] - docs: update README and file structure for v2.3.0
 
 - Updated README.md with new ORM API signatures (findBy/findAll/paginate/deleteWhere), middleware route/method params, body cache, Content-Type auto-detect, require() example, execDetach Windows fix
