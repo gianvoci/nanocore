@@ -24,20 +24,45 @@ Only discovered fields (and the primary key) are accepted by `__set`. Unknown fi
 | Operation | Method | Notes |
 | --- | --- | --- |
 | Create | `$orm->fill([...])->save()` | `isNew` starts true, insert is called |
-| Read | `$orm->findById($id)` | Returns cloned instance or `null` |
-| Read by field | `$orm->findBy('field', $value, 10)` | Returns array of cloned instances; optional third arg is limit |
-| Read all | `$orm->findAll([...], 'col DESC', 10)` | Conditions, order, limit |
+| Read | `$orm->findById($id)` | Returns cloned NanoORM instance or `null` |
+| Read by WHERE | `$orm->findBy('email = ?', [$email], 10)` | Returns `array<array>` (associative arrays); optional third arg is limit |
+| Read all | `$orm->findAll('status = ?', ['active'], 'name ASC', 10)` | WHERE, params, order, limit — returns `array<array>` |
 | Update | `$orm->field = 'x'; $orm->save()` | `isNew` is false after hydration |
 | Delete | `$orm->delete()` | Requires primary key to be set |
-| Batch delete | `$orm->deleteWhere(['status' => 'inactive'])` | Returns affected row count |
+| Batch delete | `$orm->deleteWhere('status = ?', ['inactive'])` | WHERE + params, returns affected row count |
 
 All SQL identifiers (table names, column names, aliases) are backtick-quoted (`` `name` ``) in SELECT, INSERT, UPDATE, DELETE, and DESCRIBE queries as defense in depth — this prevents issues with SQL reserved words used as identifiers.
 
-## Hydration and Cloning
+## Hydration and fromArray
 
-- `findById`, `findBy`, and `findAll` all use `(clone $this)->hydrate($row)` — each result is an independent instance.
-- `hydrate` sets `$data = $row` and `$isNew = false`.
+- `findById` uses `(clone $this)->fromArray($row)` — returns a cloned NanoORM instance.
+- `findBy` and `findAll` return plain associative arrays (`PDO::FETCH_ASSOC`) — no cloning, no ORM instances.
+- `fromArray(array $row): self` is public — sets `$data = $row` and `$isNew = false`. Useful for creating ORM instances from known data without DB queries.
 - `clear()` resets data, sets `isNew = true`, clears joins.
+
+## findBy / findAll API
+
+`findBy` and `findAll` accept a WHERE clause as a string with `?` placeholders and a `$params` array:
+
+```php
+$rows = $orm->findBy('email = ?', [$email]);
+$rows = $orm->findBy('name LIKE ?', ["%{$term}%"]);
+$rows = $orm->findBy('role IN (?, ?)', ['admin', 'mod']);
+$rows = $orm->findAll('status = ? AND user_id = ?', ['active', $uid], 'created_at DESC', 10);
+$rows = $orm->findAll();                    // all rows
+$rows = $orm->findAll('', [], 'name ASC');   // all rows ordered
+```
+
+- `findBy(string $where, array $params = [], ?int $limit = null): array<array>`
+- `findAll(string $where = '', array $params = [], string $orderBy = '', ?int $limit = null): array<array>`
+- `findById(mixed $id): ?self` — unchanged, returns NanoORM instance for mutation.
+
+For mutating a single record, use `findById()`:
+```php
+$user = $orm->findById($id);
+$user->email = 'new@example.com';
+$user->save();
+```
 
 ## JOINs
 
@@ -50,7 +75,7 @@ $orm->addJoin('table', 'localKey', 'foreignKey', 'INNER|LEFT|RIGHT|FULL|CROSS', 
 - `fetchWithJoins()` returns raw associative arrays (not ORM instances).
 - `buildSelectQuery()` is used by both `findAll` and `fetchWithJoins`.
 - `findBy` does NOT use `buildSelectQuery()` — it builds SQL directly and ignores registered JOINs. Use `fetchWithJoins()` for joined queries.
-- Field names in conditions (`findBy`, `findAll`, `deleteWhere`, `fetchWithJoins`) are validated against `/^[a-zA-Z_][a-zA-Z0-9_]*$/`. Invalid names throw `InvalidArgumentException`.
+- Field names in conditions (`fetchWithJoins`) are validated against `/^[a-zA-Z_][a-zA-Z0-9_]*$/`. Invalid names throw `InvalidArgumentException`. Note: `findBy`, `findAll`, and `deleteWhere` accept arbitrary WHERE clauses — field validation is the caller's responsibility.
 - `addJoin()` validates the table name via `validateIdentifier()` (broader than `validateFieldName()`), and validates localKey, foreignKey, and all select fields against the field name regex. The `*` wildcard is allowed for select fields. Join type must be one of: `INNER`, `LEFT`, `RIGHT`, `FULL`, `CROSS`.
 - `findAll()` validates `orderBy` via `sanitizeOrderBy()` — each column segment must match the identifier regex, direction must be a valid SQL keyword (ASC, DESC, with optional NULLS FIRST/LAST). Invalid input throws `InvalidArgumentException`.
 
@@ -63,12 +88,12 @@ $orm->addJoin('table', 'localKey', 'foreignKey', 'INNER|LEFT|RIGHT|FULL|CROSS', 
 
 ## Pagination
 
-- `paginate(int $page, int $perPage, array $conditions = [], string $orderBy = '')` — returns paginated results.
+- `paginate(int $page, int $perPage, string $where = '', array $params = [], string $orderBy = '')` — returns paginated results.
 - Both `$page` and `$perPage` must be >= 1 (validated, throws `InvalidArgumentException` if not).
 - Return structure:
   ```php
   [
-      'data'      => [...],     // array of cloned NanoORM instances
+      'data'      => [...],     // array of associative arrays
       'total'     => 42,        // total matching rows (COUNT)
       'page'      => 1,         // current page
       'per_page'  => 10,        // items per page

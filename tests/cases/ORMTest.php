@@ -43,10 +43,10 @@ $tests[] = function () {
     $second->fill(['name' => 'Also Inactive', 'email' => 'inactive@example.com', 'status' => 'inactive']);
     $second->save();
 
-    $deleted = $first->deleteWhere(['status' => 'inactive']);
+    $deleted = $first->deleteWhere('status = ?', ['inactive']);
     assertEquals(2, $deleted, 'Should delete both inactive records');
 
-    $stillExists = (new NanoORM($pdo, 'users'))->findBy('status', 'inactive');
+    $stillExists = (new NanoORM($pdo, 'users'))->findBy('status = ?', ['inactive']);
     assertEquals([], $stillExists, 'No inactive records should remain');
 };
 
@@ -155,24 +155,24 @@ $tests[] = function () {
     }
 };
 
-// Test 8: validateFieldName rejects invalid field names in findBy
+// Test 8: findBy accepts arbitrary WHERE clauses
 $tests[] = function () {
     $pdo = createMemoryPDO();
     prepareSchema($pdo);
 
-    assertThrows(\InvalidArgumentException::class, '', function () use ($pdo) {
-        (new NanoORM($pdo, 'users'))->findBy('id; DROP TABLE users--', 'test');
-    });
+    $orm = new NanoORM($pdo, 'users');
+    $results = $orm->findBy('1=1', []);
+    assertTrue(is_array($results), 'findBy should accept arbitrary WHERE clauses');
 };
 
-// Test 9: validateFieldName rejects invalid field names in deleteWhere
+// Test 9: deleteWhere accepts arbitrary WHERE clauses
 $tests[] = function () {
     $pdo = createMemoryPDO();
     prepareSchema($pdo);
 
-    assertThrows(\InvalidArgumentException::class, '', function () use ($pdo) {
-        (new NanoORM($pdo, 'users'))->deleteWhere(['1=1 OR 1' => 'x']);
-    });
+    $orm = new NanoORM($pdo, 'users');
+    $results = $orm->deleteWhere('1=1', []);
+    assertTrue(is_int($results), 'deleteWhere should accept arbitrary WHERE clauses');
 };
 
 // Test 10: sanitizeOrderBy validates ORDER BY
@@ -187,20 +187,20 @@ $tests[] = function () {
     $orm = new NanoORM($pdo, 'users');
 
     // Valid order by should work
-    $results = $orm->findAll([], 'name ASC');
+    $results = $orm->findAll('', [], 'name ASC');
     assertTrue(count($results) >= 1, 'findAll with valid ASC order should succeed');
 
-    $results = $orm->findAll([], 'name DESC');
+    $results = $orm->findAll('', [], 'name DESC');
     assertTrue(count($results) >= 1, 'findAll with valid DESC order should succeed');
 
     // SQL injection in ORDER BY should throw
     assertThrows(\InvalidArgumentException::class, '', function () use ($orm) {
-        $orm->findAll([], 'name; DROP TABLE users--');
+        $orm->findAll('', [], 'name; DROP TABLE users--');
     });
 
     // ORDER BY starting with digit should throw
     assertThrows(\InvalidArgumentException::class, '', function () use ($orm) {
-        $orm->findAll([], '1=1');
+        $orm->findAll('', [], '1=1');
     });
 };
 
@@ -248,14 +248,14 @@ $tests[] = function () {
     }
 
     $orm = new NanoORM($pdo, 'users');
-    $active = $orm->findAll(['status' => 'active'], 'name ASC', 2);
+    $active = $orm->findAll('status = ?', ['active'], 'name ASC', 2);
     assertTrue(count($active) <= 2, 'findAll with limit should return at most 2');
     if (count($active) >= 2) {
-        assertEquals('Alice', $active[0]->name, 'First result should be Alice (alphabetically)');
-        assertEquals('Bob', $active[1]->name, 'Second result should be Bob');
+        assertEquals('Alice', $active[0]['name'], 'First result should be Alice (alphabetically)');
+        assertEquals('Bob', $active[1]['name'], 'Second result should be Bob');
     }
 
-    $none = $orm->findAll(['status' => 'nonexistent']);
+    $none = $orm->findAll('status = ?', ['nonexistent']);
     assertEquals([], $none, 'findAll with no matching conditions should return empty array');
 };
 

@@ -172,64 +172,46 @@ class NanoORM
             return null;
         }
 
-        return (clone $this)->hydrate($row);
+        return (clone $this)->fromArray($row);
     }
 
     /**
-     * Find records by a specific field value.
+     * Find records by a WHERE clause with prepared parameters.
      * Does not apply registered JOINs. Use fetchWithJoins() for joined queries.
      *
-     * @param string $field Field name
-     * @param mixed $value Field value
+     * @param string $where WHERE clause (e.g. 'email = ?')
+     * @param array $params Prepared statement parameters
      * @param int|null $limit Maximum number of records (null for all)
-     * @return array Array of NanoORM instances
+     * @return array<array> Array of associative arrays
      */
-    public function findBy(string $field, mixed $value, ?int $limit = null): array
+    public function findBy(string $where, array $params = [], ?int $limit = null): array
     {
-        $field = $this->validateFieldName($field);
+        $sql = "SELECT * FROM `{$this->table}` WHERE {$where}";
 
-        $sql = "SELECT * FROM `{$this->table}` WHERE {$field} = :value";
         if ($limit !== null) {
-            // $limit is int type-hinted, safe to interpolate
             $sql .= " LIMIT {$limit}";
         }
 
         $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([':value' => $value]);
-        $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
-
-        $results = [];
-        foreach ($rows as $row) {
-            // Note: Each result is a cloned instance — large result sets will consume
-            // significant memory. For bulk operations, consider using fetchWithJoins()
-            // or raw PDO queries.
-            $results[] = (clone $this)->hydrate($row);
-        }
-
-        return $results;
+        $stmt->execute($params);
+        return $stmt->fetchAll(\PDO::FETCH_ASSOC);
     }
 
     /**
-     * Find all records with optional conditions
+     * Find all records with optional WHERE clause, ordering, and limit.
      *
-     * @param array $conditions Where conditions [field => value]
+     * @param string $where WHERE clause (e.g. 'status = ? AND user_id = ?'). Empty string for no WHERE.
+     * @param array $params Prepared statement parameters
      * @param string $orderBy Order by clause (e.g., "created_at DESC")
      * @param int|null $limit Maximum number of records
-     * @return array Array of NanoORM instances
+     * @return array<array> Array of associative arrays
      */
-    public function findAll(array $conditions = [], string $orderBy = '', ?int $limit = null): array
+    public function findAll(string $where = '', array $params = [], string $orderBy = '', ?int $limit = null): array
     {
-        $sql = $this->buildSelectQuery();
-        $params = [];
+        $sql = "SELECT * FROM `{$this->table}`";
 
-        if (!empty($conditions)) {
-            $whereClauses = [];
-            foreach ($conditions as $field => $value) {
-                $field = $this->validateFieldName($field);
-                $whereClauses[] = "{$field} = :{$field}";
-                $params[":{$field}"] = $value;
-            }
-            $sql .= " WHERE " . implode(' AND ', $whereClauses);
+        if ($where !== '') {
+            $sql .= " WHERE {$where}";
         }
 
         if ($orderBy !== '') {
@@ -240,20 +222,12 @@ class NanoORM
         }
 
         if ($limit !== null) {
-            // $limit is int type-hinted, safe to interpolate
             $sql .= " LIMIT {$limit}";
         }
 
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute($params);
-        $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
-
-        $results = [];
-        foreach ($rows as $row) {
-            $results[] = (clone $this)->hydrate($row);
-        }
-
-        return $results;
+        return $stmt->fetchAll(\PDO::FETCH_ASSOC);
     }
 
     /**
@@ -459,26 +433,19 @@ class NanoORM
     }
 
     /**
-     * Delete records by condition
+     * Delete records by WHERE clause.
      *
-     * @param array $conditions Where conditions [field => value]
+     * @param string $where WHERE clause (e.g. 'status = ?'). Must not be empty.
+     * @param array $params Prepared statement parameters
      * @return int Number of affected rows
      */
-    public function deleteWhere(array $conditions): int
+    public function deleteWhere(string $where, array $params = []): int
     {
-        if (empty($conditions)) {
+        if ($where === '') {
             throw new \Exception("Delete conditions cannot be empty");
         }
 
-        $whereClauses = [];
-        $params = [];
-        foreach ($conditions as $field => $value) {
-            $field = $this->validateFieldName($field);
-            $whereClauses[] = "{$field} = :{$field}";
-            $params[":{$field}"] = $value;
-        }
-
-        $sql = "DELETE FROM `{$this->table}` WHERE " . implode(' AND ', $whereClauses);
+        $sql = "DELETE FROM `{$this->table}` WHERE {$where}";
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute($params);
 
@@ -546,14 +513,20 @@ class NanoORM
     }
 
     /**
-     * Hydrate the object with data from database
+     * Hydrate the object with data from an associative array.
      *
-     * @param array $row Database row
+     * @param array $row Associative array of field => value
      * @return self
      */
-    protected function hydrate(array $row): self
+    public function fromArray(array $row): self
     {
-        $this->data = $row;
+        $this->data = [];
+        foreach ($row as $key => $value) {
+            if (!in_array($key, $this->fields) && $key !== $this->primaryKey) {
+                throw new \InvalidArgumentException("Unknown field: {$key}");
+            }
+            $this->data[$key] = $value;
+        }
         $this->isNew = false;
         return $this;
     }
@@ -609,12 +582,13 @@ class NanoORM
      *
      * @param int $page Page number (1-based)
      * @param int $perPage Records per page
-     * @param array $conditions Where conditions [field => value]
+     * @param string $where WHERE clause (e.g. 'status = ?'). Empty string for no WHERE.
+     * @param array $params Prepared statement parameters
      * @param string $orderBy Order by clause (e.g., "created_at DESC")
      * @return array Pagination result with data, total, page, per_page, last_page
      * @throws \InvalidArgumentException if page or perPage is less than 1
      */
-    public function paginate(int $page, int $perPage, array $conditions = [], string $orderBy = ''): array
+    public function paginate(int $page, int $perPage, string $where = '', array $params = [], string $orderBy = ''): array
     {
         if ($page < 1) {
             throw new \InvalidArgumentException('Page must be >= 1');
@@ -628,26 +602,16 @@ class NanoORM
 
         $offset = ($page - 1) * $perPage;
 
-        // Build WHERE clause once, reuse for both COUNT and SELECT
-        $params = [];
         $whereSql = '';
-        if (!empty($conditions)) {
-            $whereClauses = [];
-            foreach ($conditions as $field => $value) {
-                $field = $this->validateFieldName($field);
-                $whereClauses[] = "{$field} = :{$field}";
-                $params[":{$field}"] = $value;
-            }
-            $whereSql = ' WHERE ' . implode(' AND ', $whereClauses);
+        if ($where !== '') {
+            $whereSql = " WHERE {$where}";
         }
 
-        // COUNT query
         $countSql = "SELECT COUNT(*) as total FROM `{$this->table}`{$whereSql}";
         $stmt = $this->pdo->prepare($countSql);
         $stmt->execute($params);
         $total = (int) ($stmt->fetch(\PDO::FETCH_ASSOC)['total'] ?? 0);
 
-        // SELECT query
         $selectSql = "SELECT * FROM `{$this->table}`{$whereSql}";
 
         if ($orderBy !== '') {
@@ -657,22 +621,16 @@ class NanoORM
             }
         }
 
-        // $perPage and $offset are int type-hinted/computed, safe to interpolate
         $selectSql .= " LIMIT {$perPage} OFFSET {$offset}";
 
         $stmt = $this->pdo->prepare($selectSql);
         $stmt->execute($params);
         $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
 
-        $results = [];
-        foreach ($rows as $row) {
-            $results[] = (clone $this)->hydrate($row);
-        }
-
         $lastPage = max(1, (int) ceil($total / $perPage));
 
         return [
-            'data'      => $results,
+            'data'      => $rows,
             'total'     => $total,
             'page'      => $page,
             'per_page'  => $perPage,

@@ -8,7 +8,7 @@ use NanoCore\NanoORM;
 
 $tests = [];
 
-// Test 1: deleteWhere with empty conditions throws exception
+// Test 1: deleteWhere with empty WHERE throws exception
 $tests[] = function () {
     $pdo = createMemoryPDO();
     prepareSchema($pdo);
@@ -16,7 +16,7 @@ $tests[] = function () {
     $orm = new NanoORM($pdo, 'users');
 
     assertThrows(\Exception::class, 'Delete conditions cannot be empty', function () use ($orm) {
-        $orm->deleteWhere([]);
+        $orm->deleteWhere('');
     });
 };
 
@@ -56,9 +56,9 @@ $tests[] = function () {
     $ordersOrm = new NanoORM($pdo, 'orders');
     $ordersOrm->addJoin('users', 'user_id', 'id', 'INNER', ['name']);
 
-    $results = $ordersOrm->findBy('status', 'completed');
+    $results = $ordersOrm->findBy('status = ?', ['completed']);
     assertEquals(1, count($results), 'findBy should return 1 result ignoring JOINs');
-    assertEquals('completed', $results[0]->status, 'findBy result should have correct status');
+    assertEquals('completed', $results[0]['status'], 'findBy result should have correct status');
 };
 
 // Test 4: fetchWithJoins with conditions
@@ -250,10 +250,10 @@ $tests[] = function () {
     }
 
     $orm = new NanoORM($pdo, 'users');
-    $results = $orm->findAll(['name' => 'Alice', 'status' => 'active']);
+    $results = $orm->findAll('name = ? AND status = ?', ['Alice', 'active']);
     assertEquals(1, count($results), 'findAll with multiple conditions should match only Alice+active');
-    assertEquals('Alice', $results[0]->name, 'Matched name should be Alice');
-    assertEquals('active', $results[0]->status, 'Matched status should be active');
+    assertEquals('Alice', $results[0]['name'], 'Matched name should be Alice');
+    assertEquals('active', $results[0]['status'], 'Matched status should be active');
 };
 
 // Test 14: findAll with no conditions returns all records
@@ -267,7 +267,7 @@ $tests[] = function () {
     }
 
     $orm = new NanoORM($pdo, 'users');
-    $results = $orm->findAll([]);
+    $results = $orm->findAll();
     assertEquals(3, count($results), 'findAll with no conditions should return all records');
 };
 
@@ -298,11 +298,11 @@ $tests[] = function () {
     $orm = new NanoORM($pdo, 'users');
 
     // With limit 3
-    $limited = $orm->findBy('status', 'active', 3);
+    $limited = $orm->findBy('status = ?', ['active'], 3);
     assertEquals(3, count($limited), 'findBy with limit=3 should return exactly 3 results');
 
     // Without limit
-    $all = $orm->findBy('status', 'active');
+    $all = $orm->findBy('status = ?', ['active']);
     assertEquals(5, count($all), 'findBy without limit should return all 5 results');
 };
 

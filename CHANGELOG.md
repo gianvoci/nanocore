@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2026-06-13] - feat(orm): migrate to raw WHERE clauses and array return types
+
+- `findBy()` signature changed: `(string $where, array $params, ?int $limit)` — returns `array<array>` (associative arrays) instead of NanoORM instances
+- `findAll()` signature changed: `(string $where, array $params, string $orderBy, ?int $limit)` — returns `array<array>` instead of NanoORM instances
+- `deleteWhere()` signature changed: `(string $where, array $params)` — empty WHERE string now throws `\Exception` as safety guard
+- `paginate()` signature changed: `(string $where, array $params, string $orderBy)` — returns `array<array>` in `data` field
+- `hydrate()` renamed to `fromArray()` and made public with field validation against schema
+- `findById()` updated to use `fromArray()` instead of `hydrate()`
+- Updated ORM tests to use new signatures and array access
+- Updated specs for all ORM API changes
+
+---
+
 ## [2026-05-28] - refactor(orm): backtick quoting, strict __set validation, migration hardening
 
 - Added `declare(strict_types=1)` to `NanoORM.php`
