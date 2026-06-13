@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2026-06-13] - test: improve httpbin test stability
+
+- Added early return guards in `UtilitiesTest.php` for non-200/non-418 status codes to avoid assertion failures on transient httpbin errors
+
+---
+
 ## [2026-06-13] - chore: add AGENTS.md to export-ignore
 
 - Added `/AGENTS.md` to `.gitattributes` export-ignore list for Packagist distribution
