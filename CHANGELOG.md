@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2026-06-13] - docs: add migration guide for v2.3.0
+
+- Added `MIGRATION-to-2.3.0.md` documenting all breaking changes: new findBy/findAll signatures, paginate API change, hydrate→fromArray rename, deleteWhere safety guard, middleware route/method params, body cache, require(), execDetach fix
+- Migration checklist included for each breaking change
+
+---
+
 ## [2026-06-13] - test: add NewFeaturesTest for v2.3.0 features
 
 - Added `tests/cases/NewFeaturesTest.php` with 20 tests covering new ORM API (findBy/findAll arrays, fromArray, paginate) and Core API (body cache, Content-Type auto-detect, require(), middleware route/method params, backward compat)
