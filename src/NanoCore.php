@@ -273,17 +273,15 @@ class NanoCore
 
                     $this->emit('route.matched', ['method' => $method, 'path' => $uri, 'params' => $finalParams]);
 
-                    // Build middleware chain
                     $routeHandler = $route['handler'];
                     $chain = function (NanoCore $app, array $params) use ($routeHandler): mixed {
                         return $routeHandler($app, $params);
                     };
 
-                    // Wrap middlewares in reverse order (last registered = outermost)
                     foreach (array_reverse($this->middlewares) as $middleware) {
                         $next = $chain;
-                        $chain = function (NanoCore $app, array $params) use ($middleware, $next): mixed {
-                            return $middleware($app, $params, $next);
+                        $chain = function (NanoCore $app, array $params) use ($middleware, $next, $uri, $method): mixed {
+                            return $middleware($app, $params, $next, $uri, $method);
                         };
                     }
 
@@ -981,6 +979,7 @@ class NanoCore
             $this->configCache = $data;
         } else {
             @unlink($tmpFile);
+            throw new \Exception("Failed to write config to temporary file");
         }
     }
 
@@ -1271,10 +1270,20 @@ class NanoCore
      *
      * @param int $maxBytes Maximum bytes to read from the request body.
      * @param bool $validateContentType Whether to enforce application/json Content-Type.
-     * @return mixed The decoded JSON content or the raw content if decoding fails.
+     * @return mixed The decoded content (array or string).
      */
     public function getBodyRequest(int $maxBytes = 10_485_760, bool $validateContentType = false): mixed
     {
+        if (isset($this->storage['__nc_body'])) {
+            if ($validateContentType) {
+                $contentType = $_SERVER['CONTENT_TYPE'] ?? $_SERVER['HTTP_CONTENT_TYPE'] ?? '';
+                if ($contentType !== '' && !str_contains(strtolower($contentType), 'application/json')) {
+                    throw new \Exception("Content-Type must be application/json, got: {$contentType}");
+                }
+            }
+            return $this->storage['__nc_body'];
+        }
+
         if ($validateContentType) {
             $contentType = $_SERVER['CONTENT_TYPE'] ?? $_SERVER['HTTP_CONTENT_TYPE'] ?? '';
             if ($contentType !== '' && !str_contains(strtolower($contentType), 'application/json')) {
@@ -1286,8 +1295,18 @@ class NanoCore
         if (strlen($content) > $maxBytes) {
             throw new \Exception("Request body exceeds maximum size of {$maxBytes} bytes");
         }
-        $decoded = json_decode($content, true);
-        return json_last_error() === JSON_ERROR_NONE ? $decoded : $content;
+
+        $contentType = strtolower($_SERVER['CONTENT_TYPE'] ?? $_SERVER['HTTP_CONTENT_TYPE'] ?? '');
+
+        $result = match (true) {
+            str_contains($contentType, 'application/json') => json_decode($content, true) ?? $content,
+            str_contains($contentType, 'application/x-www-form-urlencoded') => (function() use ($content) { parse_str($content, $parsed); return $parsed; })(),
+            str_contains($contentType, 'multipart/form-data') => $_POST,
+            default => json_decode($content, true) ?? $content,
+        };
+
+        $this->storage['__nc_body'] = $result;
+        return $result;
     }
 
     /**
@@ -1351,6 +1370,32 @@ class NanoCore
     }
 
     /**
+     * Require a property from storage, throwing RuntimeException if not configured.
+     *
+     * @param string $key Property name
+     * @return mixed The property value
+     * @throws \RuntimeException If the property is not configured
+     */
+    public function require(string $key): mixed
+    {
+        if (array_key_exists($key, $this->storage)) {
+            return $this->storage[$key];
+        }
+
+        $value = match ($key) {
+            'body' => $this->getBodyRequest(),
+            'cli' => php_sapi_name() === 'cli',
+            default => throw new \RuntimeException("Required property '{$key}' not configured"),
+        };
+
+        if ($value === null) {
+            throw new \RuntimeException("Required property '{$key}' not configured");
+        }
+
+        return $value;
+    }
+
+    /**
      * Sets a value to a specified property of the object.
      *
      * @param mixed $name The name of the property to set.
@@ -1377,7 +1422,9 @@ class NanoCore
             } else {
                 $cmd = escapeshellcmd($cmd);
             }
-            pclose(popen('start /B ' . $cmd, 'r'));
+            $logDir = self::$logBasePath ?: dirname(__DIR__);
+            $logFile = escapeshellarg($logDir . '/nanocore.log');
+            pclose(popen("start /B cmd /c \"{$cmd} >> {$logFile} 2>&1\"", 'r'));
             return;
         }
 

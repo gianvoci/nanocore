@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2026-06-13] - feat(core): add route/method to middleware, body cache, require(), execDetach
+
+- Middleware callbacks now receive `$route` and `$method` as 4th and 5th parameters
+- `getBodyRequest()` caches parsed body in `$storage['__nc_body']` — subsequent calls return cached result
+- `getBodyRequest()` auto-detects Content-Type: JSON, form-urlencoded, multipart/form-data, with fallback
+- New `require(string $key): mixed` method provides fail-fast property access, throws `RuntimeException` for missing keys
+- `execDetach()` Windows fix: uses `start /B cmd /c "..." >> log 2>&1` to avoid popups
+- Config save error message improved for temp file write failures
+- Updated specs for all NanoCore changes
+
+---
+
 ## [2026-06-13] - feat(orm): migrate to raw WHERE clauses and array return types
 
 - `findBy()` signature changed: `(string $where, array $params, ?int $limit)` — returns `array<array>` (associative arrays) instead of NanoORM instances

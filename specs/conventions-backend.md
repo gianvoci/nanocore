@@ -39,9 +39,9 @@
 - `curlRequest` with `'with_info' => true` returns `['body'=>mixed,'status'=>int,'content_type'=>string|null]`. Without it, returns the body directly.
 - `curlRequest` validates URLs before making requests: only `http`/`https` schemes allowed, private/restricted IPs are blocked (SSRF protection). IPv6 bracket stripping prevents bypass via `[::1]`-style addresses. `CURLOPT_FOLLOWLOCATION` is forced `false` to prevent redirect-based SSRF. Credentials are stripped from logged URLs. Body is truncated to 500 chars in logs.
 - `curlRequest` makes up to 5 total attempts (initial + 4 retries) with linear backoff (100ms, 200ms, 300ms, 400ms) and reinitializes the curl handle on each retry via `curl_init()`. On failure, throws a generic "External request failed" exception (no internal details leaked).
-- Magic properties via `__get`/`__set` on NanoCore instance: `$app->body` reads request body via `getBodyRequest()` with a 10MB default size limit (throws on overflow). The limit is customizable only via direct `getBodyRequest($maxBytes)` calls. An optional `$validateContentType` parameter (defaults to `false`) can enforce `application/json` Content-Type. `$app->cli` returns `php_sapi_name() === 'cli'` (bool). `$app->anything_else` reads from the internal storage array (defaults to `null`).
+- Magic properties via `__get`/`__set` on NanoCore instance: `$app->body` reads request body via `getBodyRequest()` with a 10MB default size limit (throws on overflow). The limit is customizable only via direct `getBodyRequest($maxBytes)` calls. `getBodyRequest()` caches the parsed body in `$storage['__nc_body']` — subsequent calls return the cached result without re-reading `php://input`. It also auto-detects Content-Type: `application/json` → `json_decode`, `application/x-www-form-urlencoded` → `parse_str`, `multipart/form-data` → `$_POST`, other/absent → try JSON, fallback to raw string. An optional `$validateContentType` parameter (defaults to `false`) can enforce `application/json` Content-Type. `$app->cli` returns `php_sapi_name() === 'cli'` (bool). `$app->anything_else` reads from the internal storage array (defaults to `null`). `require(string $key): mixed` provides fail-fast access — throws `RuntimeException` if the key is not in `$storage` and is not a virtual property. Supports virtual properties: `require('body')` returns parsed request body, `require('cli')` returns bool. For unknown keys, throws immediately — catches typos like `$app->require('pdo')` instead of `$app->pdoo`.
 - `renderHtml` loads a template file and does string replacement from a data array using `strtr` (avoids placeholder collision). The path is validated to prevent traversal outside the project root. String values in `$data` are HTML-escaped by default (`$escape = true`); pass `false` to opt out.
-- `execDetach` runs a shell command in the background, logging output to `nanocore.log`. Accepts a string or an array of `[command, arg, arg, ...]` for proper argument escaping. On Windows, array mode escapes each argument with `escapeshellarg()` then joins them; string mode uses `escapeshellcmd()`. Execution via `pclose(popen('start /B ' . $cmd, 'r'))`. On other platforms, array mode uses `escapeshellcmd()` for the program and `escapeshellarg()` for each argument; string mode uses `escapeshellcmd()`. Execution via `shell_exec()` with output redirection to `nanocore.log`. `ob_flush()` is guarded (skips when no output buffer is active), but `flush()` always runs.
+- `execDetach` runs a shell command in the background, logging output to `nanocore.log`. Accepts a string or an array of `[command, arg, arg, ...]` for proper argument escaping. On Windows, array mode escapes each argument with `escapeshellarg()` then joins them; string mode uses `escapeshellcmd()`. Execution via `pclose(popen('start /B ' . $cmd . ' >> $logFile 2>&1', 'r'))`. On other platforms, array mode uses `escapeshellcmd()` for the program and `escapeshellarg()` for each argument; string mode uses `escapeshellcmd()`. Execution via `shell_exec()` with output redirection to `nanocore.log`. `ob_flush()` is guarded (skips when no output buffer is active), but `flush()` always runs.
 
 ## Response Methods
 
@@ -55,8 +55,10 @@
 
 - `addMiddleware(callable $middleware)` — registers a middleware. Middlewares execute in **registration order** (first registered = first executed).
 - Internally, `run()` wraps the handler in reverse-order: last registered middleware wraps innermost, so the call chain preserves registration order.
-- Middleware signature: `function (NanoCore $app, array $params, callable $next): mixed`
+- Middleware signature: `function (NanoCore $app, array $params, callable $next, string $route, string $method): mixed`
+- `$route` is the resolved path (e.g. `/api/auth/login`), `$method` is the HTTP method (e.g. `POST`).
 - `$next` signature: `$next(NanoCore $app, array $params): mixed` — calls the next middleware or the final handler.
+- Middleware that doesn't use `$route`/`$method` still works — PHP ignores extra parameters in callbacks.
 - If a middleware returns a `__nc_response` descriptor, `run()` processes it via `sendResponse()`.
 
 ## Input Validation
@@ -104,7 +106,7 @@ Built-in protections across the library:
 | Path traversal | `renderHtml` | Template path must be within project root (appends `DIRECTORY_SEPARATOR` before comparison) |
 | XSS | `renderHtml` | String values are HTML-escaped by default (`$escape = true`; opt-out via `false`) |
 | CRLF injection | `redirect` | `\r` and `\n` stripped from redirect URLs |
-| SQL injection | NanoORM | Identifier validation (`/^[a-zA-Z_][a-zA-Z0-9_]*$/`); parameterized queries via PDO prepared statements |
+| SQL injection | NanoORM | Identifier validation (`/^[a-zA-Z_][a-zA-Z0-9_]*$/`); parameterized queries via PDO prepared statements. Note: `findBy()`/`findAll()` accept arbitrary WHERE clauses — caller must ensure safe SQL |
 | Config tampering | `configSet` | Protected top-level keys (`PHP.INI`, `CORE`) throw on write — the check uses `explode('.', $prop)[0]` so nested keys like `PHP.INI.display_errors` are also protected; atomic file writes (temp + rename); internal double quotes escaped in `saveConfig()` |
 | Command injection | `execDetach` | Array mode escapes each argument with `escapeshellarg()`; Windows support with `escapeshellcmd()` |
 | Arbitrary `ini_set` | Constructor | Only directives in `ALLOWED_INI_SETTINGS` are applied; unknown ones are logged via `error_log` and skipped |
