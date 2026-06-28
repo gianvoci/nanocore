@@ -1127,13 +1127,13 @@ class NanoCore
      *                       - 'params': Request parameters. Defaults to [].
      *                       - 'headers': HTTP headers. Defaults to [].
      *                       - 'raw': bool, skip JSON decoding. Defaults to false.
-     *                       - 'with_info': bool, return ['body'=>mixed,'status'=>int,'content_type'=>string|null] instead of just the body. Defaults to false.
+     *                       - 'with_info': bool, return ['body'=>mixed,'status'=>int,'content_type'=>string|null,'headers'=>array<string,string[]>] instead of just the body. Defaults to false.
      *                       CURLOPT keys (int):
      *                       Any CURLOPT_* constant can be passed to override the default curl settings.
      *                       Examples: CURLOPT_TIMEOUT, CURLOPT_CONNECTTIMEOUT, CURLOPT_WRITEFUNCTION.
      *                       These are merged directly into the curl options array.
      * @throws \Exception When an error occurs during the cURL request.
-     * @return mixed The response from the cURL request, decoded as JSON if possible.
+     * @return mixed The response from the cURL request, decoded as JSON if possible. With 'with_info', returns ['body'=>mixed,'status'=>int,'content_type'=>string|null,'headers'=>array<string,string[]>].
      */
     public static function curlRequest(string $url, array $options = []): mixed
     {
@@ -1185,6 +1185,23 @@ class NanoCore
 
         $curlopt[CURLOPT_URL] = $url;
 
+        // Collect response headers via callback
+        $responseHeaders = [];
+        $curlopt[CURLOPT_HEADERFUNCTION] = static function ($ch, $header) use (&$responseHeaders): int {
+            $trimmed = trim($header);
+            if ($trimmed === '' || str_starts_with($trimmed, 'HTTP/')) {
+                return strlen($header);
+            }
+            $sep = strpos($trimmed, ':');
+            if ($sep === false) {
+                return strlen($header);
+            }
+            $name = substr($trimmed, 0, $sep);
+            $value = ltrim(substr($trimmed, $sep + 1));
+            $responseHeaders[$name][] = $value;
+            return strlen($header);
+        };
+
         $ch = curl_init($url);
 
         curl_setopt_array($ch, $curlopt);
@@ -1192,6 +1209,7 @@ class NanoCore
         $response = false;
         for ($retry = 0; $retry < 5; $retry++) {
             if ($retry > 0) {
+                $responseHeaders = [];
                 usleep(100000 * $retry);
                 $ch = curl_init();
                 curl_setopt_array($ch, $curlopt);
@@ -1259,6 +1277,7 @@ class NanoCore
                 'body'         => $body,
                 'status'       => (int) $httpCode,
                 'content_type' => $contentType,
+                'headers'      => $responseHeaders,
             ];
         }
 

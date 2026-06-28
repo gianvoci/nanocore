@@ -1,5 +1,17 @@
 # Changelog
 
+## [2026-06-28] - feat(core): add response headers to curlRequest with_info
+
+- Added `headers` key to `curlRequest` with_info return value — collects all response headers via `CURLOPT_HEADERFUNCTION`
+- Each header name maps to an array of values (supports duplicates like `Set-Cookie`)
+- Header names preserve original casing from response
+- Updated `specs/conventions-backend.md` with new return format
+- Added design spec `specs/2026-06-28-curl-request-headers-design.md`
+- Added `MIGRATION-to-2.3.1.md`
+- Added tests for headers key, Content-Type presence, and duplicate header collection
+
+---
+
 ## [2026-06-28] - docs(agents): add self-maintenance rules
 
 - Added self-maintenance rules section to AGENTS.md with version bump and migration guide creation instructions
