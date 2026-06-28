@@ -1,5 +1,11 @@
 # Changelog
 
+## [2026-06-28] - docs(agents): add self-maintenance rules
+
+- Added self-maintenance rules section to AGENTS.md with version bump and migration guide creation instructions
+
+---
+
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
