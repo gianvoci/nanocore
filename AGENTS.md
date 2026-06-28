@@ -14,7 +14,7 @@ Lightweight PHP library providing routing, configuration management, a micro ORM
 
 > - When modifying code, update the relevant file in `specs/`.
 > - When modifying or implementing a feature, add or update the corresponding tests in `tests/cases/`.
-> - Before committing, bump the version from the latest git tag (`git describe --tags --abbrev=0`) and create a `MIGRATION-to-{version}.md` file documenting breaking changes, new features, and migration steps. Update `CHANGELOG.md` with the new version entry. After commit, communicate to the user the exact git commands to tag and push: `git tag {version}` and `git push origin main --tags`.
+> - Before committing, bump the version from the latest git tag (`git tag --sort=-v:refname | head -1`) and create a `MIGRATION-to-{version}.md` file documenting breaking changes, new features, and migration steps. Update `CHANGELOG.md` with the new version entry. After commit, communicate to the user the exact git commands to tag and push: `git tag {version}` and `git push origin main --tags`.
 
 ## Documentation Index
 
