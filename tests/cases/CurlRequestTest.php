@@ -100,4 +100,64 @@ $tests[] = function () {
     });
 };
 
+// Test 15: Batch of 2 URLs returns array in order
+$tests[] = function () {
+    $urls = ['https://httpbin.org/get', 'https://httpbin.org/status/200'];
+    $results = NanoCore::curlRequest($urls, ['raw' => true]);
+    assertTrue(is_array($results), 'Batch should return array');
+    assertTrue(count($results) === 2, 'Batch should return 2 results');
+};
+
+// Test 16: Batch preserves URL order in results
+$tests[] = function () {
+    $urls = ['https://httpbin.org/anything?pos=1', 'https://httpbin.org/anything?pos=2'];
+    $results = NanoCore::curlRequest($urls, ['raw' => true]);
+    $first = json_decode($results[0], true);
+    $second = json_decode($results[1], true);
+    assertTrue($first['args']['pos'] === '1', 'First result should match first URL');
+    assertTrue($second['args']['pos'] === '2', 'Second result should match second URL');
+};
+
+// Test 17: Batch with with_info returns array of info arrays
+$tests[] = function () {
+    $urls = ['https://httpbin.org/get', 'https://httpbin.org/status/418'];
+    $results = NanoCore::curlRequest($urls, ['with_info' => true, 'raw' => true]);
+    assertTrue(is_array($results[0]) && isset($results[0]['body']), 'First batch result should be info array');
+    assertTrue(is_array($results[1]) && isset($results[1]['status']), 'Second batch result should be info array');
+    assertTrue($results[1]['status'] === 418, 'Second batch result status should be 418');
+};
+
+// Test 18: Batch failure returns Exception object at failed index, others succeed
+$tests[] = function () {
+    $results = NanoCore::curlRequest(
+        ['https://httpbin.org/get', 'http://nonexistent.invalid'],
+        ['raw' => true, CURLOPT_CONNECTTIMEOUT => 2, CURLOPT_TIMEOUT => 2]
+    );
+    assertTrue(is_array($results), 'Batch should return array even with failures');
+    assertTrue(is_string($results[0]), 'First URL should succeed with body string');
+    assertTrue($results[1] instanceof Exception, 'Second URL should be Exception object');
+};
+
+// Test 19: Empty URL array returns empty array
+$tests[] = function () {
+    $results = NanoCore::curlRequest([], ['raw' => true]);
+    assertTrue(is_array($results) && count($results) === 0, 'Empty array should return empty array');
+};
+
+// Test 20: Single URL string still works (backward compat)
+$tests[] = function () {
+    $result = NanoCore::curlRequest('https://httpbin.org/get', ['raw' => true]);
+    assertTrue(is_string($result), 'Single URL string should return string body');
+};
+
+// Test 21: Batch of 15 URLs completes successfully (smoke test for concurrency queue)
+$tests[] = function () {
+    $urls = [];
+    for ($i = 0; $i < 15; $i++) {
+        $urls[] = 'https://httpbin.org/status/200';
+    }
+    $results = NanoCore::curlRequest($urls, ['raw' => true]);
+    assertTrue(count($results) === 15, 'Should return 15 results for 15 URLs');
+};
+
 runTests($tests);

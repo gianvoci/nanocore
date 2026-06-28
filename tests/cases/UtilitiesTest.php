@@ -273,9 +273,9 @@ $tests[] = function () {
     if ($result['status'] !== 200) {
         return;
     }
-    assertTrue(array_key_exists('Content-Type', $result['headers']), 'headers should contain Content-Type');
-    assertTrue(is_array($result['headers']['Content-Type']), 'Content-Type header value should be an array');
-    assertTrue(str_contains($result['headers']['Content-Type'][0], 'application/json'), 'Content-Type should contain application/json');
+    assertTrue(array_key_exists('content-type', $result['headers']), 'headers should contain content-type');
+    assertTrue(is_array($result['headers']['content-type']), 'content-type header value should be an array');
+    assertTrue(str_contains($result['headers']['content-type'][0], 'application/json'), 'content-type should contain application/json');
 };
 
 // Test 24: curlRequest with_info headers collect duplicate headers as array
@@ -284,8 +284,8 @@ $tests[] = function () {
     if ($result['status'] !== 200) {
         return;
     }
-    assertTrue(array_key_exists('Set-Cookie', $result['headers']), 'headers should contain Set-Cookie');
-    assertTrue(count($result['headers']['Set-Cookie']) >= 2, 'duplicate Set-Cookie headers should be collected as array with 2+ values');
+    assertTrue(array_key_exists('set-cookie', $result['headers']), 'headers should contain set-cookie');
+    assertTrue(count($result['headers']['set-cookie']) >= 2, 'duplicate set-cookie headers should be collected as array with 2+ values');
 };
 
 runTests($tests);

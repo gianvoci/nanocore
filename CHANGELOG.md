@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.4.0] - 2026-06-28 - feat(core): curl_multi support in curlRequest
+
+- `curlRequest` now accepts `string|array $url` — string for single request, array of URLs for parallel batch via `curl_multi`
+- Max 10 concurrent handles; excess URLs queued automatically
+- Retry per-request (5 attempts, linear backoff 100ms-400ms) — non-blocking, timestamp-based
+- Batch failures return `Exception` objects in results array (batch continues, does not abort)
+- Per-request duration in logs (not batch-scoped)
+- Empty array `[]` returns `[]` immediately
+- All existing features preserved: `with_info`, `raw`, `method`, `params`, `headers`, CURLOPT_* passthrough, SSRF protection, header collection, streaming (CURLOPT_WRITEFUNCTION)
+
+---
+
 ## [2026-06-28] - feat(core): add response headers to curlRequest with_info
 
 - Added `headers` key to `curlRequest` with_info return value — collects all response headers via `CURLOPT_HEADERFUNCTION`

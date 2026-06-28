@@ -1120,7 +1120,7 @@ class NanoCore
     /**
      * A function to make a cURL request to a specified URL with optional parameters and headers.
      *
-     * @param string $url The URL to make the request to.
+     * @param string|array $url The URL(s) to make the request to. String for single, array for batch.
      * @param array $options An optional array of options to customize the request.
      *                       Logical keys (string):
      *                       - 'method': HTTP method. Defaults to 'GET'.
@@ -1133,155 +1133,333 @@ class NanoCore
      *                       Examples: CURLOPT_TIMEOUT, CURLOPT_CONNECTTIMEOUT, CURLOPT_WRITEFUNCTION.
      *                       These are merged directly into the curl options array.
      * @throws \Exception When an error occurs during the cURL request.
-     * @return mixed The response from the cURL request, decoded as JSON if possible. With 'with_info', returns ['body'=>mixed,'status'=>int,'content_type'=>string|null,'headers'=>array<string,string[]>].
+     * @return mixed The response from the cURL request, decoded as JSON if possible. With 'with_info', returns ['body'=>mixed,'status'=>int,'content_type'=>string|null,'headers'=>array<string,string[]>]. For batch, returns array of results in input order.
      */
-    public static function curlRequest(string $url, array $options = []): mixed
+    public static function curlRequest(string|array $url, array $options = []): mixed
     {
-        self::validateUrlNotRestricted($url);
+        $isSingle = is_string($url);
+        $urls     = $isSingle ? [$url] : $url;
+
+        if (empty($urls)) {
+            return [];
+        }
+
+        // Validate all URLs upfront
+        foreach ($urls as $u) {
+            self::validateUrlNotRestricted($u);
+        }
 
         $startTime = hrtime(true);
 
-        $curlopt = [
+        // Extract logical options with defaults
+        $method   = strtoupper($options['method'] ?? 'GET');
+        $params   = $options['params']   ?? [];
+        $headers  = $options['headers']  ?? [];
+        $raw      = $options['raw']      ?? false;
+        $withInfo = $options['with_info'] ?? false;
+
+        // Remove logical keys — whatever remains are CURLOPT_* constants
+        unset($options['method'], $options['params'], $options['headers'], $options['raw'], $options['with_info']);
+
+        // Base curl options — caller overrides merged into defaults
+        $baseCurlopt = array_replace([
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_FOLLOWLOCATION => false,
             CURLOPT_AUTOREFERER    => true,
             CURLOPT_CONNECTTIMEOUT => 30,
             CURLOPT_TIMEOUT        => 30,
             CURLOPT_MAXREDIRS      => 5,
-        ];
+        ], $options);
 
-        // Extract logical keys with defaults
-        $method    = $options['method']    ?? 'GET';
-        $params    = $options['params']    ?? [];
-        $headers   = $options['headers']   ?? [];
-        $raw       = $options['raw']       ?? false;
-        $withInfo  = $options['with_info'] ?? false;
+        // ponytail: force SSRF protection over any caller override
+        $baseCurlopt[CURLOPT_FOLLOWLOCATION] = false;
 
-        // Remove logical keys — whatever remains are CURLOPT_* constants
-        unset($options['method'], $options['params'], $options['headers'], $options['raw'], $options['with_info']);
+        $maxRetries  = 5;
+        $backoffMs   = [100, 200, 300, 400]; // retries 1-4
+        $maxConcurrent = 10;
 
-        // Merge caller-provided CURLOPT_* overrides into defaults
-        $curlopt = array_replace($curlopt, $options);
+        // State per handle index
+        $handleDataByIndex = [];
+        $results = array_fill(0, count($urls), null);
+        $activeHandles = 0;
 
-        // Force disable follow location for SSRF protection — redirect targets are not re-validated
-        $curlopt[CURLOPT_FOLLOWLOCATION] = false;
+        // Build curl options + init handle for a single URL
+        $initHandle = function (string $url) use ($baseCurlopt, $method, $params, $headers): array {
+            $curlopt  = $baseCurlopt;
+            $finalUrl = $url;
+            $curlopt[CURLOPT_CUSTOMREQUEST] = $method;
 
-        // Configure HTTP method
-        $method = strtoupper($method);
-        $curlopt[CURLOPT_CUSTOMREQUEST] = $method;
-
-        if (!empty($params)) {
-            if ($method === 'GET') {
-                $url .= (str_contains($url, '?') ? '&' : '?') . http_build_query($params);
-            } else {
-                $curlopt[CURLOPT_POSTFIELDS] = $params;
+            if (!empty($params)) {
+                if ($method === 'GET') {
+                    $finalUrl .= (str_contains($finalUrl, '?') ? '&' : '?') . http_build_query($params);
+                } else {
+                    $curlopt[CURLOPT_POSTFIELDS] = $params;
+                }
             }
-        }
 
-        // Add headers if provided
-        if (!empty($headers)) {
-            $curlopt[CURLOPT_HTTPHEADER] = $headers;
-        }
+            $curlopt[CURLOPT_URL] = $finalUrl;
 
-        $curlopt[CURLOPT_URL] = $url;
+            if (!empty($headers)) {
+                $curlopt[CURLOPT_HTTPHEADER] = $headers;
+            }
 
-        // Collect response headers via callback
-        $responseHeaders = [];
-        $curlopt[CURLOPT_HEADERFUNCTION] = static function ($ch, $header) use (&$responseHeaders): int {
-            $trimmed = trim($header);
-            if ($trimmed === '' || str_starts_with($trimmed, 'HTTP/')) {
+            // Each handle gets its own header collector (object = always by reference in PHP)
+            $headerCollector = new \stdClass();
+            $headerCollector->headers = [];
+            $curlopt[CURLOPT_HEADERFUNCTION] = static function ($ch, $header) use ($headerCollector): int {
+                $trimmed = trim($header);
+                if ($trimmed === '' || str_starts_with($trimmed, 'HTTP/')) {
+                    return strlen($header);
+                }
+                $sep = strpos($trimmed, ':');
+                if ($sep === false) {
+                    return strlen($header);
+                }
+                $name = substr($trimmed, 0, $sep);
+                $value = ltrim(substr($trimmed, $sep + 1));
+                $headerCollector->headers[$name][] = $value;
                 return strlen($header);
-            }
-            $sep = strpos($trimmed, ':');
-            if ($sep === false) {
-                return strlen($header);
-            }
-            $name = substr($trimmed, 0, $sep);
-            $value = ltrim(substr($trimmed, $sep + 1));
-            $responseHeaders[$name][] = $value;
-            return strlen($header);
+            };
+
+            $ch = curl_init();
+            curl_setopt_array($ch, $curlopt);
+
+            return [
+                'ch'              => $ch,
+                'curlopt'         => $curlopt,
+                'headerCollector' => $headerCollector,
+                'startTime'       => hrtime(true),
+                'retries'         => 0,
+                'retryAt'         => null,
+            ];
         };
 
-        $ch = curl_init($url);
+        $mh = curl_multi_init();
 
-        curl_setopt_array($ch, $curlopt);
+        // Seed initial batch (up to maxConcurrent)
+        $seedCount = min($maxConcurrent, count($urls));
+        for ($i = 0; $i < $seedCount; $i++) {
+            $handleDataByIndex[$i] = $initHandle($urls[$i]);
+            curl_multi_add_handle($mh, $handleDataByIndex[$i]['ch']);
+            $activeHandles++;
+        }
+        $nextQueueIdx = $seedCount;
 
-        $response = false;
-        for ($retry = 0; $retry < 5; $retry++) {
-            if ($retry > 0) {
-                $responseHeaders = [];
-                usleep(100000 * $retry);
-                $ch = curl_init();
-                curl_setopt_array($ch, $curlopt);
+        // Main curl_multi loop — runs until all handles done, retried, or exhausted
+        while (true) {
+            // Add queued URLs when slots open
+            while ($activeHandles < $maxConcurrent && $nextQueueIdx < count($urls)) {
+                $i = $nextQueueIdx++;
+                $handleDataByIndex[$i] = $initHandle($urls[$i]);
+                curl_multi_add_handle($mh, $handleDataByIndex[$i]['ch']);
+                $activeHandles++;
             }
-            $response = curl_exec($ch);
-            if ($response !== false) {
+
+            // Process expired retry timestamps (non-blocking)
+            $now = hrtime(true);
+            $pendingRetries = 0;
+            foreach ($handleDataByIndex as &$hd) {
+                if ($hd['retryAt'] !== null) {
+                    $pendingRetries++;
+                    if ($hd['retryAt'] <= $now) {
+                        $hd['retryAt'] = null;
+                        // ponytail: fresh header collector per retry to prevent accumulation across attempts
+                        $retryCollector = new \stdClass();
+                        $retryCollector->headers = [];
+                        $hd['headerCollector'] = $retryCollector;
+                        $hd['curlopt'][CURLOPT_HEADERFUNCTION] = static function ($ch, $header) use ($retryCollector): int {
+                            $trimmed = trim($header);
+                            if ($trimmed === '' || str_starts_with($trimmed, 'HTTP/')) {
+                                return strlen($header);
+                            }
+                            $sep = strpos($trimmed, ':');
+                            if ($sep === false) {
+                                return strlen($header);
+                            }
+                            $name = substr($trimmed, 0, $sep);
+                            $value = ltrim(substr($trimmed, $sep + 1));
+                            $retryCollector->headers[$name][] = $value;
+                            return strlen($header);
+                        };
+                        $hd['startTime'] = hrtime(true);
+                        $hd['ch'] = curl_init();
+                        curl_setopt_array($hd['ch'], $hd['curlopt']);
+                        curl_multi_add_handle($mh, $hd['ch']);
+                        $activeHandles++;
+                    }
+                }
+            }
+            unset($hd);
+
+            // No active handles but retries pending — sleep until nearest retry instead of busy-spinning
+            if ($activeHandles === 0 && $pendingRetries > 0) {
+                $nearest = null;
+                foreach ($handleDataByIndex as &$hd2) {
+                    if ($hd2['retryAt'] !== null) {
+                        $remaining = $hd2['retryAt'] - hrtime(true);
+                        if ($nearest === null || $remaining < $nearest) {
+                            $nearest = $remaining;
+                        }
+                    }
+                }
+                unset($hd2);
+                if ($nearest !== null && $nearest > 0) {
+                    $sleepUs = (int)($nearest / 1_000);
+                    usleep((int)min($sleepUs, 1_000_000));
+                }
+            }
+
+            // Exit when nothing is in flight, queued, or waiting for retry
+            if ($activeHandles === 0 && $nextQueueIdx >= count($urls) && $pendingRetries === 0) {
                 break;
             }
+
+            // Execute multi
+            do {
+                $status = curl_multi_exec($mh, $running);
+            } while ($status === CURLM_CALL_MULTI_PERFORM);
+
+            // Wait for activity
+            curl_multi_select($mh, 1);
+
+            // Collect completed handles
+            while (($info = curl_multi_info_read($mh, $msgs)) !== false) {
+                if ($info['msg'] !== CURLMSG_DONE) {
+                    continue;
+                }
+
+                $ch = $info['handle'];
+                // Find the handle index by comparing curl handle objects
+                $foundIdx = null;
+                foreach ($handleDataByIndex as $idx => $h) {
+                    if ($h['ch'] === $ch) {
+                        $foundIdx = $idx;
+                        break;
+                    }
+                }
+                if ($foundIdx === null) {
+                    curl_multi_remove_handle($mh, $info['handle']);
+                    continue;
+                }
+
+                $responseBody = curl_multi_getcontent($ch);
+                $httpCode     = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                $contentType  = curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
+
+                curl_multi_remove_handle($mh, $ch);
+                $activeHandles--;
+
+                if ($info['result'] !== CURLE_OK) {
+                    // Handle-level failure — schedule retry or exhaust
+                    $handleDataByIndex[$foundIdx]['retries']++;
+                    if ($handleDataByIndex[$foundIdx]['retries'] < $maxRetries) {
+                        $handleDataByIndex[$foundIdx]['retryAt'] = hrtime(true)
+                            + ($backoffMs[$handleDataByIndex[$foundIdx]['retries'] - 1] * 1_000_000);
+                        $handleDataByIndex[$foundIdx]['ch'] = null;
+                    } else {
+                        // Exhausted all retries
+                        if ($isSingle) {
+                            curl_multi_close($mh);
+                            throw new \Exception("External request failed");
+                        }
+                        $results[$foundIdx] = new \Exception("External request failed");
+                        unset($handleDataByIndex[$foundIdx]);
+                    }
+                    continue;
+                }
+
+                // Success — store raw result for post-processing
+                $results[$foundIdx] = [
+                    'body'            => $responseBody,
+                    'httpCode'        => $httpCode,
+                    'contentType'     => $contentType === false ? null : $contentType,
+                    'responseHeaders' => $handleDataByIndex[$foundIdx]['headerCollector']->headers,
+                    'startTime'       => $handleDataByIndex[$foundIdx]['startTime'],
+                    'curlopt'         => $handleDataByIndex[$foundIdx]['curlopt'],
+                ];
+                unset($handleDataByIndex[$foundIdx]);
+            }
         }
 
-        if ($response === false) {
-            throw new \Exception("External request failed");
-        }
+        curl_multi_close($mh);
 
-        $httpCode    = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $contentType = curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
-        if ($contentType === false) {
-            $contentType = null;
-        }
+        // Post-process each result: decode body, build return value, log
+        $finalResults = [];
 
-        // Log the request
-        if (self::$logBasePath !== null) {
-            $duration = (int) ((hrtime(true) - $startTime) / 1_000_000);
-            $paramsStr = is_array($params) ? json_encode($params, JSON_UNESCAPED_SLASHES) : (string) $params;
-
-            // Strip userinfo from URL before logging to avoid credential disclosure
-            $safeUrl = preg_replace('#^(https?://)[^@]+@#', '$1', $url);
-
-            if (isset($curlopt[CURLOPT_WRITEFUNCTION])) {
-                $logBody = '[streamed]';
-            } else {
-                $logBody = mb_substr((string) $response, 0, 500, 'UTF-8') . (mb_strlen((string) $response) > 500 ? '... [truncated]' : '');
+        foreach ($results as $i => $result) {
+            if ($result instanceof \Exception) {
+                $finalResults[$i] = $result;
+                continue;
             }
 
-            $logLine = sprintf(
-                '[%s] curlRequest %s %s -> %d (%dms) | params: %s | response: %s',
-                date('Y-m-d H:i:s'),
-                $method,
-                $safeUrl,
-                $httpCode,
-                $duration,
-                $paramsStr,
-                $logBody
-            );
-            $logPath = self::$logBasePath . '/nanocore.log';
-            file_put_contents($logPath, $logLine . PHP_EOL, FILE_APPEND | LOCK_EX);
+            // Safety guard against null results (should not happen)
+            if ($result === null) {
+                continue;
+            }
+
+            $responseBody    = $result['body'];
+            $httpCode        = $result['httpCode'];
+            $contentType     = $result['contentType'];
+            $responseHeaders = $result['responseHeaders'];
+            $curlopt         = $result['curlopt'];
+
+            // Log the request
+            if (self::$logBasePath !== null) {
+                $handleStartTime = $result['startTime'] ?? $startTime;
+                $duration  = (int) ((hrtime(true) - $handleStartTime) / 1_000_000);
+                $paramsStr = is_array($params) ? json_encode($params, JSON_UNESCAPED_SLASHES) : (string) $params;
+
+                // Strip userinfo from URL before logging to avoid credential disclosure
+                $safeUrl = preg_replace('#^(https?://)[^@]+@#', '$1', $curlopt[CURLOPT_URL]);
+
+                if (isset($curlopt[CURLOPT_WRITEFUNCTION])) {
+                    $logBody = '[streamed]';
+                } else {
+                    $logBody = mb_substr((string) $responseBody, 0, 500, 'UTF-8')
+                        . (mb_strlen((string) $responseBody) > 500 ? '... [truncated]' : '');
+                }
+
+                $logLine = sprintf(
+                    '[%s] curlRequest %s %s -> %d (%dms) | params: %s | response: %s',
+                    date('Y-m-d H:i:s'),
+                    $method,
+                    $safeUrl,
+                    $httpCode,
+                    $duration,
+                    $paramsStr,
+                    $logBody
+                );
+                file_put_contents(self::$logBasePath . '/nanocore.log', $logLine . PHP_EOL, FILE_APPEND | LOCK_EX);
+            }
+
+            // Determine the response body value
+            if (isset($curlopt[CURLOPT_WRITEFUNCTION])) {
+                // When CURLOPT_WRITEFUNCTION is set, curl_multi_getcontent returns true — body consumed by callback
+                $body = $responseBody;
+            } elseif ($raw) {
+                $body = $responseBody;
+            } else {
+                $decoded = json_decode($responseBody, true);
+                $body = json_last_error() === JSON_ERROR_NONE ? $decoded : $responseBody;
+            }
+
+            if ($withInfo) {
+                $finalResults[$i] = [
+                    'body'         => $body,
+                    'status'       => (int) $httpCode,
+                    'content_type' => $contentType,
+                    'headers'      => $responseHeaders,
+                ];
+            } else {
+                $finalResults[$i] = $body;
+            }
         }
 
-        // Determine the response body value
-        if (isset($curlopt[CURLOPT_WRITEFUNCTION])) {
-            // When CURLOPT_WRITEFUNCTION is set, curl_exec returns true on success — body consumed by callback
-            $body = $response;
-        } elseif ($raw) {
-            // When 'raw' option is true, skip JSON decoding
-            $body = $response;
-        } else {
-            // Decode JSON when valid, otherwise return raw response
-            $decoded = json_decode($response, true);
-            $body = json_last_error() === JSON_ERROR_NONE ? $decoded : $response;
+        if ($isSingle) {
+            return $finalResults[0];
         }
 
-        // Return info array when with_info is requested
-        if ($withInfo) {
-            return [
-                'body'         => $body,
-                'status'       => (int) $httpCode,
-                'content_type' => $contentType,
-                'headers'      => $responseHeaders,
-            ];
-        }
-
-        return $body;
+        return $finalResults;
     }
 
     /**
