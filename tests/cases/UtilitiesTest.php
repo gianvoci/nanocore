@@ -259,4 +259,33 @@ $tests[] = function () {
     assertTrue(is_array($result['body']), 'with_info body should be JSON-decoded array when response is JSON');
 };
 
+// Test 22: curlRequest with_info returns headers key
+$tests[] = function () {
+    $result = NanoCore::curlRequest('https://httpbin.org/get', ['with_info' => true, 'raw' => true]);
+    assertTrue(is_array($result), 'with_info should return an array');
+    assertTrue(array_key_exists('headers', $result), 'with_info result should have headers key');
+    assertTrue(is_array($result['headers']), 'headers should be an array');
+};
+
+// Test 23: curlRequest with_info headers contain expected header
+$tests[] = function () {
+    $result = NanoCore::curlRequest('https://httpbin.org/get', ['with_info' => true, 'raw' => true]);
+    if ($result['status'] !== 200) {
+        return;
+    }
+    assertTrue(array_key_exists('Content-Type', $result['headers']), 'headers should contain Content-Type');
+    assertTrue(is_array($result['headers']['Content-Type']), 'Content-Type header value should be an array');
+    assertTrue(str_contains($result['headers']['Content-Type'][0], 'application/json'), 'Content-Type should contain application/json');
+};
+
+// Test 24: curlRequest with_info headers collect duplicate headers as array
+$tests[] = function () {
+    $result = NanoCore::curlRequest('https://httpbin.org/response-headers?Set-Cookie=foo=1&Set-Cookie=bar=2', ['with_info' => true, 'raw' => true]);
+    if ($result['status'] !== 200) {
+        return;
+    }
+    assertTrue(array_key_exists('Set-Cookie', $result['headers']), 'headers should contain Set-Cookie');
+    assertTrue(count($result['headers']['Set-Cookie']) >= 2, 'duplicate Set-Cookie headers should be collected as array with 2+ values');
+};
+
 runTests($tests);
