@@ -5,7 +5,7 @@ A lightweight PHP micro-framework with routing, config management, a micro ORM, 
 ## Features
 
 - Pattern-based routing with path parameters and wildcards
-- Response methods: `json()`, `html()`, `redirect()`
+- Response methods: `$app->json()`, `$app->html()`, `$app->redirect()`
 - Middleware pipeline with `$next` chaining, route and method passed to callbacks
 - Input validation with 10 built-in rules
 - Event system with built-in lifecycle events
@@ -53,11 +53,11 @@ use NanoCore\NanoCore;
 $app = new NanoCore();
 
 $app->addRoute('GET', '/', function ($app, $params) {
-    return json(['message' => 'Hello, NanoCore!']);
+    return $app->json(['message' => 'Hello, NanoCore!']);
 });
 
 $app->addRoute('GET', '/users/@id', function ($app, $params) {
-    return json(['user_id' => $params['id']]);
+    return $app->json(['user_id' => $params['id']]);
 });
 
 $app->run();
@@ -128,22 +128,24 @@ Return from handlers to send structured responses. `run()` detects `__nc_respons
 
 ```php
 // JSON response with Content-Type header
-return json(['user' => $user], 201);
+return $app->json(['user' => $user], 201);
 
-// HTML template rendering
-return html('templates/profile.html', ['{{NAME}}' => $user->name]);
+// HTML response with raw content
+return $app->html('<h1>Hello</h1>', 200);
 
 // Redirect (CRLF stripped from URL for security)
-return redirect('/login', 302);
+return $app->redirect('/login', 302);
 ```
 
-| Function | Signature | Description |
+| Method | Signature | Description |
 | --- | --- | --- |
-| `json()` | `json($data, $status = 200)` | JSON response with Content-Type header |
-| `html()` | `html($path, $data, $escape = true)` | Rendered HTML template |
+| `json()` | `json($data, $status = 200, array $headers = [])` | JSON response with Content-Type header |
+| `html()` | `html(string $content, int $status = 200, array $headers = [])` | Raw HTML response (not a template path) |
 | `redirect()` | `redirect($url, $status = 302)` | Redirect header (CR/LF stripped) |
 
-Returning a plain array still works — auto-encoded as JSON with status 200.
+For template rendering with XSS escaping, use `$app->renderHtml()` (see [HTML Rendering](#html-rendering) section).
+
+To send a JSON response, use `$app->json()` or return a `__nc_response` descriptor. Returning a plain array does NOT auto-encode — it is returned to the caller without HTTP output.
 
 ## Middleware
 
@@ -167,35 +169,32 @@ $app->addMiddleware(function ($app, $params, $next, $route, $method) {
 ## Input Validation
 
 ```php
-use function NanoCore\validate;
-use function NanoCore\check;
-
 // Throws Exception(422) on failure
-$validated = validate($data, [
+$validated = $app->validate($data, [
     'name'  => 'required|string',
     'email' => 'required|email',
-    'age'   => 'int|min:0|max:150',
+    'age'   => 'integer|min:0|max:150',
 ]);
 
 // Returns result array — no exception
-$result = check($data, ['email' => 'required|email']);
+$result = $app->check($data, ['email' => 'required|email']);
 // $result = ['valid' => bool, 'errors' => array, 'data' => array]
 ```
 
 ### Built-in Rules
 
-| Rule | Param | Example |
-| --- | --- | --- |
-| `required` | — | `required` |
-| `string` | — | `string` |
-| `int` | — | `int` |
-| `float` | — | `float` |
-| `bool` | — | `bool` |
-| `email` | — | `email` |
-| `url` | — | `url` |
-| `min` | `:value` | `min:1` |
-| `max` | `:value` | `max:100` |
-| `regex` | `:pattern` | `regex:^[a-z]+$` |
+| Rule | Param | Example | Description |
+| --- | --- | --- | --- |
+| `required` | — | `required` | Field must be present and non-empty |
+| `integer` | — | `integer` | Must be a whole number (numeric + no fractional part) |
+| `numeric` | — | `numeric` | Must be numeric (int or float) |
+| `string` | — | `string` | Must be a string |
+| `email` | — | `email` | Must be a valid email address |
+| `url` | — | `url` | Must be a valid URL |
+| `min` | `:value` | `min:1` | Numeric: >= value. String: >= length |
+| `max` | `:value` | `max:100` | Numeric: <= value. String: <= length |
+| `regex` | `:pattern` | `regex:^[a-z]+$` | Must match regex (auto-wrapped in `/` delimiters) |
+| `in` | `:values` | `in:active,pending` | Must be one of the comma-separated values |
 
 The `regex` rule auto-wraps the pattern in `/` delimiters — do not include delimiters in the param.
 
@@ -234,7 +233,9 @@ $app->addCommand('seed', function ($app, $args) {
 });
 ```
 
-CLI mode is detected automatically — `run()` delegates to `runCli()` when `php_sapi_name() === 'cli'`. Exits with code 1 on unknown command.
+CLI mode is detected automatically — `run()` delegates to `runCli()` when `php_sapi_name() === 'cli'` AND at least one command is registered. With no commands registered in CLI, `run()` falls through to the HTTP path. Exits with code 1 on unknown command.
+
+Command names must match `/^[a-zA-Z0-9:_-]+$/` — invalid names throw `InvalidArgumentException`.
 
 ```bash
 php index.php migrate
@@ -257,13 +258,11 @@ Config keys read from `.env`:
 
 | Key | Description |
 | --- | --- |
-| `SESSION.AUTO_START` | Auto-start session on construction |
-| `SESSION.NAME` | Session cookie name |
-| `SESSION.LIFETIME` | Cookie lifetime in seconds |
-| `SESSION.PATH` | Cookie path |
-| `SESSION.DOMAIN` | Cookie domain |
-| `SESSION.SECURE` | HTTPS-only cookie |
-| `SESSION.HTTPONLY` | HTTP-only cookie (no JS access) |
+| `SESSION.COOKIE_HTTPONLY` | HTTP-only cookie (no JS access) |
+| `SESSION.COOKIE_SECURE` | HTTPS-only cookie |
+| `SESSION.USE_STRICT_MODE` | Reject uninitialized session IDs |
+
+Only these 3 keys are read by `sessionStart()`. Other `SESSION.*` keys (e.g. `AUTO_START`, `NAME`, `LIFETIME`, `PATH`, `DOMAIN`) are not yet implemented.
 
 `sessionStart()` is idempotent. `sessionDestroy()` guards for active session.
 
@@ -307,7 +306,7 @@ All values are strings — `DB.PORT=3306` returns `"3306"`, not `3306`.
 
 ### Config Template
 
-A `.env.example` file is included as a template with all available settings commented out. Copy it to `.env` and fill in your values.
+A `.env.example` file is included as a minimal template with common settings (DB.*, PHP.INI.*) commented out. See the Configuration section below for the full list of available keys.
 
 ### PHP.ini Settings
 
@@ -404,6 +403,8 @@ $result = (new NanoORM($pdo, 'users'))->paginate(1, 25, 'status = ?', ['active']
 
 Validates `page` and `perPage` >= 1.
 
+Note: `paginate()` throws `LogicException` if JOINs are registered via `addJoin()`. Use `fetchWithJoins()` for paginated join queries (or call `clear()` first).
+
 ### Transactions
 
 ```php
@@ -441,10 +442,13 @@ NanoORM::rollbackDir($pdo, __DIR__ . '/migrations');
 $status = NanoORM::migrationStatus($pdo, __DIR__ . '/migrations');
 ```
 
-File naming: `YYYY_MM_DD_HH_MM_SS_name.sql`
-Rollback files: `YYYY_MM_DD_HH_MM_SS_name_rollback.sql` (required for rollback)
+File naming: `{digits}_{name}.sql` (e.g. `2026_01_01_00_00_00_init.sql` or `1_init.sql`). The prefix must be digits followed by an underscore; the name must be alphanumeric + underscores. The `YYYY_MM_DD_HH_MM_SS` format is the recommended convention but not enforced.
+
+Rollback files: stored in a `rollback/` subdirectory with the SAME filename as the migration (e.g. `migrations/rollback/2026_01_01_00_00_00_init.sql`), NOT a `_rollback.sql` suffix. Rollback files are required for rollback to work.
 
 Driver detection for SQLite vs MySQL. Invalid file names throw `InvalidArgumentException`.
+
+Note: Migration SQL files are split on `;` — avoid semicolons inside string literals or comments, as the splitter is naive and will break the statement.
 
 ### Joins
 
@@ -454,7 +458,7 @@ $orders
     ->addJoin('users', 'user_id', 'id', 'INNER', ['name', 'email'])
     ->addJoin('products', 'product_id', 'id', 'LEFT', ['title', 'price']);
 
-$rows = $orders->fetchWithJoins('status = ?', ['completed']);
+$rows = $orders->fetchWithJoins(['status' => 'completed']);
 // $rows = [
 //     ['id' => 1, 'status' => 'completed', 'j0_name' => 'Jane', 'j1_title' => 'Widget', ...],
 //     ...
@@ -476,7 +480,7 @@ Join types: `INNER`, `LEFT`, `RIGHT`, `FULL`, `CROSS`.
 | `findAll($where, $params, $orderBy, $limit)` | `array<array>` | Find with WHERE, order, limit — returns associative arrays |
 | `paginate($page, $perPage, $where, $params, $orderBy)` | `array` | Paginated results with metadata |
 | `addJoin($table, $local, $foreign, $type, $fields)` | `self` | Register a JOIN |
-| `fetchWithJoins($conds)` | `array` | Execute query with registered JOINs |
+| `fetchWithJoins(array $conditions)` | `array` | Execute query with registered JOINs (associative array conditions) |
 | `beginTransaction()` | `void` | Start a transaction |
 | `commit()` | `void` | Commit current transaction |
 | `rollback()` | `void` | Rollback current transaction |
@@ -526,11 +530,11 @@ $html = NanoCore::curlRequest('https://example.com/page', [
     'raw' => true,
 ]);
 
-// Get response with metadata (status code, content type)
+// Get response with metadata (status code, content type, headers)
 $info = NanoCore::curlRequest('https://api.example.com/users', [
     'with_info' => true,
 ]);
-// $info = ['body' => ..., 'status' => 200, 'content_type' => 'application/json']
+// $info = ['body' => ..., 'status' => 200, 'content_type' => 'application/json', 'headers' => [...]]
 ```
 
 **Options:**
@@ -541,7 +545,7 @@ $info = NanoCore::curlRequest('https://api.example.com/users', [
 | `params` | array | `[]` | Request parameters (query string for GET, POST body otherwise) |
 | `headers` | array | `[]` | HTTP headers |
 | `raw` | bool | `false` | Skip JSON decoding, return raw string |
-| `with_info` | bool | `false` | Return `['body'=>mixed,'status'=>int,'content_type'=>string|null]` instead of just the body |
+| `with_info` | bool | `false` | Return `['body'=>mixed,'status'=>int,'content_type'=>string|null,'headers'=>array<string,string[]>]` instead of just the body |
 | `CURLOPT_*` | mixed | varies | Any curl constant — merged directly into curl options |
 
 Features:
@@ -557,6 +561,34 @@ Features:
 - Credentials stripped from logged URLs
 - Response body truncated to 500 chars in logs
 - Retry reinitializes the curl handle between attempts (`curl_init`). CurlHandle objects are freed automatically.
+
+### Batch Requests
+
+`curlRequest` accepts an array of URLs for parallel execution via `curl_multi`:
+
+```php
+$results = NanoCore::curlRequest([
+    'https://api.example.com/users',
+    'https://api.example.com/posts',
+    'https://api.example.com/comments',
+]);
+// $results = [body1, body2, body3] — in input order
+```
+
+- Max 10 concurrent handles; excess URLs are queued and processed as slots open
+- Per-URL retry (5 attempts, linear backoff 100ms-400ms) — non-blocking, timestamp-based
+- Batch failures return `Exception` objects in the results array (batch continues, does not abort)
+- Empty array `[]` returns `[]` immediately
+- All options (`with_info`, `raw`, `method`, `params`, `headers`, CURLOPT_*) apply to every URL in the batch
+
+```php
+$results = NanoCore::curlRequest([
+    'https://httpbin.org/get',
+    'http://nonexistent.invalid',  // will fail
+], ['with_info' => true]);
+// $results[0] = ['body' => '...', 'status' => 200, 'content_type' => 'application/json', 'headers' => [...]]
+// $results[1] = Exception('External request failed')
+```
 
 ### SSRF Validation (public)
 
@@ -589,6 +621,8 @@ $app->addRoute('POST', '/users', function ($app, $params) {
 ```
 
 Default size limit: 10MB. Throws if exceeded.
+
+When `validateContentType=true`, JSON is enforced ONLY if a Content-Type header is present. An empty Content-Type bypasses the check and falls back to auto-detection.
 
 ### Content-Type Auto-Detection
 
@@ -624,7 +658,8 @@ $app->execDetach(['php', 'process.php', '--user', $userId, '--action', 'notify']
 
 Output is logged to `nanocore.log` in the project root.
 Output buffering is flushed safely — no errors if no buffer is active.
-Windows support via `escapeshellcmd()`.
+
+On Windows, array mode uses `escapeshellarg` per element; string mode uses `escapeshellcmd`. On non-Windows, array mode uses `escapeshellcmd` on the program name and `escapeshellarg` on each argument; string mode uses `escapeshellcmd`.
 
 ## Magic Properties
 
@@ -654,7 +689,7 @@ NanoCore has security protections built in:
 | **SQL Injection** | NanoORM | All identifiers validated. Field names backtick-quoted in queries. PDO prepared statements for all values. Note: `findBy()`/`findAll()`/`deleteWhere()` accept arbitrary WHERE — caller must ensure safe SQL. |
 | **XSS Prevention** | `renderHtml` | HTML-escaping enabled by default. Path traversal blocked. |
 | **Config Tampering** | `configSet` | Protected keys (`PHP.INI`, `CORE`) cannot be modified. Atomic file writes. Internal double quotes escaped in `saveConfig()`. |
-| **Command Injection** | `execDetach` | Array mode escapes each argument independently. Windows support with `escapeshellcmd()`. |
+| **Command Injection** | `execDetach` | Array mode escapes each argument independently via `escapeshellarg`. String mode uses `escapeshellcmd`. |
 | **Arbitrary ini_set** | Constructor | Only 13 safe PHP directives are allowed. |
 | **Error Disclosure** | Error handlers | No file paths or line numbers in error responses. |
 | **Throwable Catching** | `run()` | Catches `\Throwable` not just `\Exception` |
@@ -664,6 +699,10 @@ NanoCore has security protections built in:
 ### Known Limitations
 
 - **DNS rebinding TOCTOU**: DNS resolution is checked before the request, but the actual connection may resolve to a different IP. This is a known limitation of client-side SSRF validation.
+- **`executeSqlFile` naive `;` split**: Migration SQL files are split on `;` — semicolons inside string literals or comments will break the statement.
+- **`paginate()` throws if JOINs registered**: Pagination does not support joined queries. Use `fetchWithJoins()` or call `clear()` first.
+- **`CURLOPT_MAXREDIRS` ineffective**: `CURLOPT_MAXREDIRS=5` is set in defaults but has no effect because `CURLOPT_FOLLOWLOCATION` is force-disabled for SSRF safety. Redirects are NOT followed.
+- **`getBodyRequest` JSON enforcement bypassed on empty Content-Type**: When `validateContentType=true`, JSON is enforced only if a Content-Type header is present. An empty Content-Type bypasses the check.
 
 ## Error Handling
 
@@ -685,4 +724,4 @@ throw new \Exception('Server error', 500);
 
 ## License
 
-GPL-3.0 — see [LICENSE](https://www.gnu.org/licenses/gpl-3.0.html)
+GPL-3.0-or-later — see [LICENSE](https://www.gnu.org/licenses/gpl-3.0.html)

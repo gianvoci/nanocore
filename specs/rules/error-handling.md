@@ -87,3 +87,4 @@ Key rules:
 - Always provide a valid HTTP status code (100–599) as the second argument.
 - Don't use codes outside 100–599 — NanoCore will default to 500.
 - `run()` returns the handler's return value for normal responses. If the handler returns a truthy `__nc_response` descriptor (`!empty()` check), `run()` calls `sendResponse()` and returns `null`. If an exception is caught, `run()` outputs a JSON error via `sendJsonError()` and returns `null`.
+- A handler returning a plain array without `__nc_response => true` is NOT auto-encoded — the array is returned to the caller with no HTTP output. To send a response, the handler must return either a `__nc_response` descriptor (from `$app->json()`, `$app->html()`, `$app->redirect()`) or nothing (for an empty 204).
