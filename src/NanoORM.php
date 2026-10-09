@@ -147,6 +147,19 @@ class NanoORM
     }
 
     /**
+     * Fill only whitelisted fields (mass-assignment protection).
+     * Keys not in $allowed are silently skipped (strict comparison).
+     *
+     * @param array $data    Field => value pairs (e.g. request input)
+     * @param array $allowed Assignable field names
+     * @return self
+     */
+    public function fillOnly(array $data, array $allowed): self
+    {
+        return $this->fill(array_intersect_key($data, array_flip($allowed)));
+    }
+
+    /**
      * Get all data as array
      *
      * @return array

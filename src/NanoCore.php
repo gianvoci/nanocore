@@ -17,6 +17,15 @@ class NanoCore
 {
     private const PROTECTED_CONFIG_KEYS = ['PHP.INI', 'CORE'];
 
+    // Characters forbidden in config keys: whitespace, '=', '#', quotes, backslash, control chars
+    private const INVALID_CONFIG_KEY_PATTERN = '/[\s=#"\'\\\\]|[\x00-\x1F\x7F]/';
+
+    private const SAMESITE_VALUES = ['Lax', 'Strict', 'None'];
+
+    private const SENSITIVE_PARAM_PATTERN = '/pass|secret|token|key|auth|credential/i';
+
+    private const REDACTED_VALUE = '***';
+
     private const ALLOWED_INI_SETTINGS = [
         'display_errors',
         'error_log',
@@ -95,6 +104,12 @@ class NanoCore
     private function setErrorHandlers(): void
     {
         set_error_handler(function ($errno, $errstr, $errfile, $errline) {
+
+            // @ lowers the runtime mask but not the ini value; errors excluded by the configured error_reporting still throw as in 2.4.0
+            if (!(error_reporting() & $errno) && error_reporting() !== (int) ini_get('error_reporting')) {
+                return false;
+            }
+
             throw new ErrorException($errstr, 0, $errno, $errfile, $errline);
         });
 
@@ -105,6 +120,9 @@ class NanoCore
 
     /**
      * Send a JSON error response and terminate.
+     *
+     * When CORE.EXPOSE_ERRORS is false, server errors (5xx) return a generic message
+     * and the original message is written to nanocore.log.
      */
     private function sendJsonError(\Throwable $exception): void
     {
@@ -113,15 +131,46 @@ class NanoCore
             $status = 500;
         }
 
+        $message = $exception->getMessage();
+        // Read from cache directly: the exception handler must not trigger a config reload
+        $exposeErrors = filter_var($this->configCache['CORE']['EXPOSE_ERRORS'] ?? true, FILTER_VALIDATE_BOOLEAN);
+        if (!$exposeErrors && $status >= 500) {
+            $this->logUnhandledException($exception);
+            $message = 'Internal Server Error';
+        }
+
         header('Content-Type: application/json');
         http_response_code($status);
         echo json_encode(
             [
-                'error' => $exception->getMessage(),
+                'error' => $message,
                 'code'  => $status,
             ],
             JSON_THROW_ON_ERROR
         );
+    }
+
+    /**
+     * Append an unhandled exception to nanocore.log when the log directory is known.
+     */
+    private function logUnhandledException(\Throwable $exception): void
+    {
+        if (self::$logBasePath === null) {
+            return;
+        }
+
+        // Strip CR/LF so a crafted message cannot forge additional log lines
+        $message = str_replace(["\r", "\n"], ' ', $exception->getMessage());
+        $logLine = sprintf(
+            '[%s] Unhandled exception (%s): %s',
+            date('Y-m-d H:i:s'),
+            $exception::class,
+            $message
+        );
+
+        if (@file_put_contents(self::$logBasePath . '/nanocore.log', $logLine . PHP_EOL, FILE_APPEND | LOCK_EX) === false) {
+            error_log($logLine);
+        }
     }
 
     /**
@@ -727,6 +776,18 @@ class NanoCore
             return;
         }
 
+        $sameSite = $this->configGet('SESSION.COOKIE_SAMESITE');
+        if ($sameSite !== null) {
+            if (!is_scalar($sameSite)) {
+                throw new \InvalidArgumentException("Invalid SESSION.COOKIE_SAMESITE value");
+            }
+            $sameSite = ucfirst(strtolower((string)$sameSite));
+            if (!in_array($sameSite, self::SAMESITE_VALUES, true)) {
+                throw new \InvalidArgumentException("Invalid SESSION.COOKIE_SAMESITE value: {$sameSite}");
+            }
+            ini_set('session.cookie_samesite', $sameSite);
+        }
+
         $httpOnly = $this->configGet('SESSION.COOKIE_HTTPONLY');
         if ($httpOnly !== null) {
             ini_set('session.cookie_httponly', (int)filter_var($httpOnly, FILTER_VALIDATE_BOOLEAN));
@@ -774,6 +835,19 @@ class NanoCore
         $_SESSION = [];
     }
 
+    /**
+     * Regenerate the session ID while keeping session data, and delete the old session.
+     * No-op when no session is active. Side effect: sends a new session cookie.
+     */
+    public function sessionRegenerate(): void
+    {
+        if (session_status() !== PHP_SESSION_ACTIVE) {
+            return;
+        }
+
+        session_regenerate_id(true);
+    }
+
     ################
     # CONFIG MANAGER
     ################
@@ -810,7 +884,11 @@ class NanoCore
     private function parseEnvFile(string $path, array &$config): void
     {
         $contents = @file_get_contents($path);
-        if ($contents === false || $contents === '') {
+        if ($contents === false) {
+            throw new \Exception("Cannot read config file: {$path}");
+        }
+
+        if ($contents === '') {
             return;
         }
 
@@ -1026,10 +1104,16 @@ class NanoCore
      */
     public function configSet(string $prop, mixed $value): void
     {
-        $topLevelKey = explode('.', $prop)[0];
-        if (in_array($topLevelKey, self::PROTECTED_CONFIG_KEYS, true)) {
-            throw new \Exception("Cannot modify protected config key: {$topLevelKey}");
+        $this->assertValidConfigKey($prop);
+
+        foreach (self::PROTECTED_CONFIG_KEYS as $protected) {
+            // Also rejects ancestor keys (e.g. PHP for PHP.INI), which would overwrite the protected subtree
+            if ($prop === $protected || str_starts_with($prop, $protected . '.') || str_starts_with($protected . '.', $prop . '.')) {
+                throw new \Exception("Cannot modify protected config key: {$protected}");
+            }
         }
+
+        $this->assertSafeConfigValue($value);
 
         $config = $this->loadConfig();
 
@@ -1048,10 +1132,44 @@ class NanoCore
     }
 
     /**
+     * Throw if a config key is empty or contains characters unsafe for the .env format.
+     *
+     * @throws \InvalidArgumentException When the key is invalid.
+     */
+    private function assertValidConfigKey(string $key): void
+    {
+        if ($key === '' || preg_match(self::INVALID_CONFIG_KEY_PATTERN, $key) === 1) {
+            throw new \InvalidArgumentException("Invalid config key: {$key}");
+        }
+    }
+
+    /**
+     * Throw if a config value cannot be written safely to the .env file.
+     * Arrays are validated recursively, including their keys.
+     *
+     * @throws \InvalidArgumentException When a key is invalid or a leaf contains line breaks or NUL bytes.
+     */
+    private function assertSafeConfigValue(mixed $value): void
+    {
+        if (is_array($value)) {
+            foreach ($value as $key => $item) {
+                $this->assertValidConfigKey((string)$key);
+                $this->assertSafeConfigValue($item);
+            }
+            return;
+        }
+
+        if (strpbrk((string)$value, "\r\n\0") !== false) {
+            throw new \InvalidArgumentException("Config value must not contain line breaks or NUL bytes");
+        }
+    }
+
+    /**
      * Validate that a URL does not resolve to a restricted IP address.
+     * Hostnames are resolved for both A (IPv4) and AAAA (IPv6) records.
      *
      * Known limitation: DNS rebinding attacks can bypass this check because
-     * DNS resolution happens twice (once here via gethostbynamel, once by curl).
+     * DNS resolution happens twice (once here via gethostbynamel and dns_get_record, once by curl).
      * Between the two resolutions, DNS could return a different IP.
      * For critical security, consider using CURLOPT_RESOLVE to pin the validated IP.
      */
@@ -1093,8 +1211,10 @@ class NanoCore
         }
 
         // For hostnames, resolve DNS and check the resulting IPs
-        $resolvedIps = gethostbynamel($host);
-        if ($resolvedIps === false || empty($resolvedIps)) {
+        $ipv4 = gethostbynamel($host) ?: [];
+        $ipv6 = array_column(@dns_get_record($host, DNS_AAAA) ?: [], 'ipv6');
+        $resolvedIps = array_merge($ipv4, $ipv6);
+        if (empty($resolvedIps)) {
             // Hostname doesn't resolve — let curl handle the error
             return;
         }
@@ -1115,6 +1235,47 @@ class NanoCore
                 throw new \Exception("URL points to a restricted network address");
             }
         }
+    }
+
+    /**
+     * Replace the values of sensitive keys (password, secret, token, key, auth, credential) with a placeholder.
+     * Nested arrays under non-sensitive keys are masked recursively.
+     *
+     * @param array $params The request parameters to mask.
+     * @return array A copy of $params with sensitive values redacted.
+     */
+    private static function maskSensitiveParams(array $params): array
+    {
+        $masked = [];
+        foreach ($params as $key => $value) {
+            if (preg_match(self::SENSITIVE_PARAM_PATTERN, (string)$key) === 1) {
+                $masked[$key] = self::REDACTED_VALUE;
+            } elseif (is_array($value)) {
+                $masked[$key] = self::maskSensitiveParams($value);
+            } else {
+                $masked[$key] = $value;
+            }
+        }
+        return $masked;
+    }
+
+    /**
+     * Mask sensitive parameters in the query string of a URL, for logging only.
+     *
+     * @param string $url The URL whose query string may contain sensitive parameters.
+     * @return string The URL with sensitive query values redacted, unchanged when it has no query.
+     */
+    private static function maskUrlQuery(string $url): string
+    {
+        $query = parse_url($url, PHP_URL_QUERY);
+        if (!is_string($query) || $query === '') {
+            return $url;
+        }
+
+        parse_str($query, $params);
+        $maskedQuery = http_build_query(self::maskSensitiveParams($params));
+
+        return substr_replace($url, '?' . $maskedQuery, strpos($url, '?'), strlen($query) + 1);
     }
 
     /**
@@ -1407,10 +1568,12 @@ class NanoCore
             if (self::$logBasePath !== null) {
                 $handleStartTime = $result['startTime'] ?? $startTime;
                 $duration  = (int) ((hrtime(true) - $handleStartTime) / 1_000_000);
-                $paramsStr = is_array($params) ? json_encode($params, JSON_UNESCAPED_SLASHES) : (string) $params;
+                $paramsStr = is_array($params)
+                    ? json_encode(self::maskSensitiveParams($params), JSON_UNESCAPED_SLASHES)
+                    : '[raw body]';
 
                 // Strip userinfo from URL before logging to avoid credential disclosure
-                $safeUrl = preg_replace('#^(https?://)[^@]+@#', '$1', $curlopt[CURLOPT_URL]);
+                $safeUrl = self::maskUrlQuery(preg_replace('#^(https?://)[^@]+@#', '$1', $curlopt[CURLOPT_URL]));
 
                 if (isset($curlopt[CURLOPT_WRITEFUNCTION])) {
                     $logBody = '[streamed]';
@@ -1523,15 +1686,17 @@ class NanoCore
             throw new \Exception("Template file not found: {$filename}");
         }
 
-        // Ensure the template is within the project root
+        // Ensure the template is within the project root or the config file directory
         // CLI mode: basePath is empty, use current working directory as root
-        $rootPath = realpath($this->basePath ?: '.');
-        if ($rootPath === false) {
-            throw new \Exception("Template file path is outside the allowed directory");
-        }
-        // Append separator to prevent sibling directory bypass (e.g. /var/www2 matching /var/www)
-        $rootPath = rtrim($rootPath, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
-        if ($realPath !== $rootPath && !str_starts_with($realPath, $rootPath)) {
+        $allowedRoots = array_filter([realpath($this->basePath ?: '.'), realpath(dirname($this->configFile))]);
+        $isAllowed = array_any($allowedRoots, function (string $root) use ($realPath): bool {
+            // Append separator to prevent sibling directory bypass (e.g. /var/www2 matching /var/www)
+            $rootPath = rtrim($root, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
+            return $realPath === $rootPath || str_starts_with($realPath, $rootPath);
+        });
+
+        // The config file may sit inside an allowed root but must never be served as a template
+        if (!$isAllowed || $realPath === realpath($this->configFile)) {
             throw new \Exception("Template file path is outside the allowed directory");
         }
 

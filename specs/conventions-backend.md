@@ -1,130 +1,63 @@
-> Read this when writing or modifying PHP code in this library.
+> Read this when you write or review PHP code in `src/` or code that consumes NanoCore.
 
 # Backend Conventions
 
-## General
+## Source style
 
-- Always use long `<?php` opening tag (not `<?`) — ensures loading on default PHP installs.
-- All source files use `declare(strict_types=1)`.
-- Namespace is `NanoCore` — all classes live in the project root under this namespace.
-- PHP >=8.5 minimum — use named arguments, match expressions, nullsafe operator, etc. where appropriate.
-- No runtime dependencies beyond PHP itself (no external libraries).
+| Topic | Convention |
+| --- | --- |
+| File header | `<?php`, blank line, `declare(strict_types=1);`, docblock, `namespace NanoCore;` |
+| Layout | One class per file; sections marked with `#####` / `# SECTION` banners |
+| Naming | `camelCase` methods/vars, `UPPER_SNAKE` `private const`, assertion helpers prefixed `assert*` (e.g. `assertValidConfigKey`) |
+| Types | Every param and return typed; union types allowed (`string\|array`); `mixed` when needed |
+| Exceptions | Root `\Exception` with HTTP code for client-facing errors; `\InvalidArgumentException` for programmer/input errors; `\RuntimeException` from `require()` |
+| Static vs instance | Utilities without app state are `public static` (`curlRequest`, `validate*NotRestricted`); log dir shared via `private static ?string $logBasePath` |
+| PHP 8.5 features | `match`, `str_starts_with`, `array_any`, numeric separators (`10_485_760`) are in use |
 
-## Error Handling
+## Handlers and responses
 
-- The constructor registers a custom error handler that converts all PHP errors to `ErrorException`.
-- A shared `sendJsonError()` private method handles all JSON error responses. It emits `{error, code}` where `code` is the clamped HTTP status (100–599, defaults to 500) rather than the raw exception code. File and line are intentionally excluded for security.
-- `run()` catches `\Throwable` (not just `\Exception`) and delegates to `sendJsonError()`.
-- Controllers using this library should throw exceptions with HTTP codes: `throw new \Exception('Not found', 404)`.
-- All JSON encoding uses `JSON_THROW_ON_ERROR` to prevent silent encoding failures.
-
-## Config System
-
-- Config lives in `.env` (or custom file passed to constructor). The file path is validated — must be a `.env` file within the project directory.
-- Dot-notation keys: `configGet('PHP.INI')` returns the `PHP.INI` nested object.
-- `configSet` creates nested structure automatically. Protected keys (`PHP.INI`, `CORE`) cannot be modified via `configSet`.
-- `PHP.INI` is a special key — the constructor iterates it and calls `ini_set()` only for allowed directives (see `ALLOWED_INI_SETTINGS` constant). Unknown directives are logged via `error_log` and skipped.
-
-## Config Caching
-
-- Config values are cached in memory after first read. Subsequent `configGet` calls return from cache.
-- `configSet` updates the cache only after a successful file write.
-- `saveConfig` uses atomic writes (temp file + rename) to prevent corruption. Flattens nested arrays to dot-notation `.env` format.
-- The cache is an in-memory property — it does not persist across requests.
-
-## Type Patterns
-
-- `addRoute` accepts mixed method/path and casts to string internally.
-- `curlRequest` is static — called as `NanoCore::curlRequest($url, $options)`. `$url` accepts `string` (single request) or `array` of URL strings (batch parallel via `curl_multi`). Options are shared across all URLs in a batch. Max 10 concurrent handles; excess URLs are queued. Empty array returns `[]` immediately.
-- `curlRequest` with `'with_info' => true` returns `['body'=>mixed,'status'=>int,'content_type'=>string|null,'headers'=>array<string,string[]>]`. The `headers` key maps each response header name to an array of values (e.g. `['Content-Type' => ['application/json'], 'Set-Cookie' => ['session=abc', 'csrf=def']]`). Header names preserve original casing from the response. Without `'with_info'`, returns the body directly. In batch mode, returns an `array` of results in the same order as input URLs; failed URLs appear as `Exception` objects at their index (batch does not abort on individual failures).
-- `curlRequest` validates URLs before making requests: only `http`/`https` schemes allowed, private/restricted IPs are blocked (SSRF protection). IPv6 bracket stripping prevents bypass via `[::1]`-style addresses. `CURLOPT_FOLLOWLOCATION` is forced `false` to prevent redirect-based SSRF (and re-asserted after `array_replace` to defeat caller overrides). Credentials are stripped from logged URLs. Body is truncated to 500 chars in logs. Each URL in a batch is validated independently. Note: `CURLOPT_MAXREDIRS` defaults to 5 but is inert because `FOLLOWLOCATION` is disabled — redirects are never followed regardless.
-- `curlRequest` makes up to 5 total attempts (initial + 4 retries) with linear backoff (100ms, 200ms, 300ms, 400ms) per request. Retry is non-blocking: on handle failure, the handle is removed from the multi, a retry timestamp is registered, and other handles continue processing. When the timestamp expires, the handle is re-initialized via `curl_init()` and re-added. On failure (single URL or after all retries exhausted), throws a generic "External request failed" exception (no internal details leaked). In batch mode, failed URLs yield `Exception` objects in the results array.
-- Magic properties via `__get`/`__set` on NanoCore instance: `$app->body` reads request body via `getBodyRequest()` with a 10MB default size limit (throws on overflow). The limit is customizable only via direct `getBodyRequest($maxBytes)` calls. `getBodyRequest()` caches the parsed body in `$storage['__nc_body']` — subsequent calls return the cached result without re-reading `php://input`. It also auto-detects Content-Type: `application/json` → `json_decode`, `application/x-www-form-urlencoded` → `parse_str`, `multipart/form-data` → `$_POST`, other/absent → try JSON, fallback to raw string. An optional `$validateContentType` parameter (defaults to `false`) can enforce `application/json` Content-Type. `$app->cli` returns `php_sapi_name() === 'cli'` (bool). `$app->anything_else` reads from the internal storage array (defaults to `null`). `require(string $key): mixed` provides fail-fast access — throws `RuntimeException` if the key is not in `$storage` and is not a virtual property. Supports virtual properties: `require('body')` returns parsed request body, `require('cli')` returns bool. For unknown keys, throws immediately — catches typos like `$app->require('pdo')` instead of `$app->pdoo`.
-- `renderHtml` loads a template file and does string replacement from a data array using `strtr` (avoids placeholder collision). The path is validated to prevent traversal outside the project root. String values in `$data` are HTML-escaped by default (`$escape = true`); pass `false` to opt out.
-- `execDetach` runs a shell command in the background, logging output to `nanocore.log`. Accepts a string or an array of `[command, arg, arg, ...]` for proper argument escaping. On Windows, array mode escapes each argument with `escapeshellarg()` then joins them; string mode uses `escapeshellcmd()`. Execution via `pclose(popen('start /B ' . $cmd . ' >> $logFile 2>&1', 'r'))`. On other platforms, array mode uses `escapeshellcmd()` for the program and `escapeshellarg()` for each argument; string mode uses `escapeshellcmd()`. Execution via `shell_exec()` with output redirection to `nanocore.log`. `ob_flush()` is guarded (skips when no output buffer is active), but `flush()` always runs.
-
-## Response Methods
-
-- `json(mixed $data, int $status = 200, array $headers = [])` — returns a `__nc_response` descriptor: `['__nc_response' => true, 'type' => 'json', 'body' => $data, 'status' => $status, 'headers' => ['Content-Type: application/json', ...$headers]]`. Any `Content-Type` header passed in `$headers` is deduplicated — the built-in `application/json` header takes precedence.
-- `html(string $content, int $status = 200, array $headers = [])` — returns a `__nc_response` descriptor: `['__nc_response' => true, 'type' => 'html', 'body' => $content, 'status' => $status, 'headers' => ['Content-Type: text/html; charset=UTF-8', ...$headers]]`. Note: `html()` takes raw content, NOT a template path. Template rendering is a separate `renderHtml()` method.
-- `redirect(string $url, int $status = 302)` — returns a `__nc_response` descriptor: `['__nc_response' => true, 'type' => 'redirect', 'body' => null, 'status' => $status, 'headers' => ["Location: {$url}"], 'url' => $url]`. CRLF injection is prevented: `\r` and `\n` are stripped from the URL.
-- `run()` detects `__nc_response` descriptors in handler return values and delegates to `sendResponse()` (private), which sets headers and outputs the body.
-- `sendResponse()` handles: reads `headers` from the descriptor and calls `header()` for each. `json` (encodes body as JSON), `html` (echoes `$descriptor['body']` directly — no template rendering), `redirect` (sets `Location` header), empty return (204 No Content), null return with custom status (e.g. 304 Not Modified). For 204 and 304 status codes, no body is output.
+- Handler signature: `function (NanoCore $app, array $params)`; return `$app->json(...)`, `$app->html(...)` or `$app->redirect(...)`.
+- Returning a plain array/string sends **nothing** — `run()` returns it to the caller. Contract: [routing/spec.md](routing/spec.md).
+- Signal errors by throwing with the HTTP status as code; never `echo` + `exit` inside handlers. Recipe: [rules/error-handling.md](rules/error-handling.md).
 
 ## Middleware
 
-- `addMiddleware(callable $middleware)` — registers a middleware. Middlewares execute in **registration order** (first registered = first executed).
-- Internally, `run()` wraps the handler in reverse-order: last registered middleware wraps innermost, so the call chain preserves registration order.
-- Middleware signature: `function (NanoCore $app, array $params, callable $next, string $route, string $method): mixed`
-- `$route` is the resolved path (e.g. `/api/auth/login`), `$method` is the HTTP method (e.g. `POST`).
-- `$next` signature: `$next(NanoCore $app, array $params): mixed` — calls the next middleware or the final handler.
-- Middleware that doesn't use `$route`/`$method` still works — PHP ignores extra parameters in callbacks.
-- If a middleware returns a `__nc_response` descriptor, `run()` processes it via `sendResponse()`.
+```php
+$app->addMiddleware(function (NanoCore $app, array $params, callable $next, string $uri, string $method): mixed {
+    if (!$app->sessionGet('user')) {
+        throw new \Exception('Unauthorized', 401);
+    }
+    return $next($app, $params);   // must return $next's result to keep the descriptor
+});
+```
 
-## Input Validation
-
-- `validate(array $data, array $rules)` — validates data against rules. Throws `\Exception` with HTTP 422 on failure. Returns validated data on success.
-- `check(array $data, array $rules)` — validates data against rules. Returns `['valid' => bool, 'errors' => array, 'data' => array]`. Does not throw.
-- `check()` skips absent optional fields — if a field is not present and not `required`, it is not validated.
-- 10 built-in rules: `required`, `integer`, `numeric`, `string`, `min`, `max`, `email`, `url`, `regex`, `in`.
-- Rule syntax: `'fieldname' => 'required|email'` (pipe-separated) or `'fieldname' => ['required', 'min:5']` (array).
-- `in` — value must be in a comma-separated allow-list. Syntax: `'fieldname' => 'in:admin,user,guest'`.
-- `parseRule('min:5')` → `['name' => 'min', 'param' => '5']`.
-- The `regex` rule auto-wraps the pattern in `/` delimiters. Do NOT include delimiters in the param. Example: `regex:^/api/` becomes `/^/api//` internally. If the pattern is invalid, validation throws `InvalidArgumentException`.
+First registered = outermost. Middleware only runs for matched routes (404s bypass it).
 
 ## Events
 
-- `on(string $event, callable $listener)` — registers a listener for an event.
-- `emit(string $event, array $data = [])` — emits an event, calling all registered listeners in order. Catches `\Throwable` in each listener to prevent one broken listener from breaking the chain.
-- 4 built-in events emitted by `run()`:
-  - `route.matched` — emitted on successful route match, data includes method, path, params.
-  - `route.not_found` — emitted on 404, data includes method, path.
-  - `error` — emitted on any `\Throwable` caught by `run()`, data includes exception.
-  - `response.sent` — emitted after every response is sent.
+- `on($event, fn(NanoCore $app, array $data))`; `emit()` calls listeners in registration order.
+- A throwing listener never breaks the request: the error is appended to `nanocore.log` and the next listener runs. Do not rely on exceptions from listeners for control flow.
+- Built-in event names and payloads: [routing/spec.md](routing/spec.md#built-in-events).
 
-## CLI Commands
+## Shared state
 
-- `addCommand(string $name, callable $handler)` — registers a CLI command. Command names are validated against `/^[a-zA-Z0-9:_-]+$/`. Invalid names throw `InvalidArgumentException`.
-- `runCli()` — dispatches CLI commands based on `$_SERVER['argv']`.
-- `run()` checks `php_sapi_name() === 'cli' && !empty($this->commands)` and delegates to `runCli()` if both conditions are true. If in CLI mode with no commands registered, it falls through to HTTP route dispatch.
-- CLI commands receive `($app, $args)` where `$args` is the argv array.
+- Store services on the app instance via magic properties: `$app->pdo = $pdo;` then `$app->require('pdo')` (throws if missing) or `$app->pdo` (returns `null` if missing).
+- `body` and `cli` are reserved virtual keys; `__nc_body` is the internal body cache key — do not overwrite.
 
-## Sessions
+## Logging
 
-- `sessionStart()` — idempotent session start. Reads these config keys before starting: `SESSION.COOKIE_HTTPONLY` → sets `session.cookie_httponly` via `ini_set`, `SESSION.COOKIE_SECURE` → sets `session.cookie_secure` via `ini_set`, `SESSION.USE_STRICT_MODE` → sets `session.use_strict_mode` via `ini_set`. Boolean config values are converted using `filter_var($value, FILTER_VALIDATE_BOOLEAN)` (not `(int)(bool)` cast). Does nothing if session is already active.
-- `sessionGet(string $key, $default = null)` — reads a session value.
-- `sessionSet(string $key, $value)` — writes a session value.
-- `sessionDestroy()` — destroys the session. Guards for active session before calling `session_destroy()`.
+- Single sink: `{dir of .env}/nanocore.log`, appended with `FILE_APPEND | LOCK_EX`, line format `[Y-m-d H:i:s] <context>: <message>`.
+- Before logging untrusted data: strip CR/LF and mask secrets (see `maskSensitiveParams`, `maskUrlQuery`, `logUnhandledException`).
+- Logging must not throw in error paths (use `@file_put_contents` + `error_log()` fallback as in `logUnhandledException`).
 
-## Security
+## Security patterns to reuse
 
-Built-in protections across the library:
+| Need | Reuse |
+| --- | --- |
+| Outbound URL | `self::validateUrlNotRestricted($url)` |
+| SQL identifier | `validateIdentifier()` / `validateFieldName()` in NanoORM |
+| Header value from input | Strip `\r`/`\n` (as in `redirect()`) |
+| File path from input | `realpath` + root prefix check with trailing `DIRECTORY_SEPARATOR` (as in `renderHtml()`) |
+| Shell command | Array form + `escapeshellarg` (as in `execDetach()`) |
 
-| Protection | Where | How |
-| --- | --- | --- |
-| SSRF | `curlRequest` | Only `http`/`https` schemes; blocks private/restricted IPs; resolves DNS to check resulting IPs; empty host rejection; IPv6 bracket stripping to prevent bypass; `CURLOPT_FOLLOWLOCATION` forced `false` |
-| Path traversal | `renderHtml` | Template path must be within project root (appends `DIRECTORY_SEPARATOR` before comparison) |
-| XSS | `renderHtml` | String values are HTML-escaped by default (`$escape = true`; opt-out via `false`) |
-| CRLF injection | `redirect` | `\r` and `\n` stripped from redirect URLs |
-| SQL injection | NanoORM | Identifier validation (`/^[a-zA-Z_][a-zA-Z0-9_]*$/`); parameterized queries via PDO prepared statements. Note: `findBy()`/`findAll()` accept arbitrary WHERE clauses — caller must ensure safe SQL |
-| Config tampering | `configSet` | Protected top-level keys (`PHP.INI`, `CORE`) throw on write — the check uses `explode('.', $prop)[0]` so nested keys like `PHP.INI.display_errors` are also protected; atomic file writes (temp + rename); internal double quotes escaped in `saveConfig()` |
-| Command injection | `execDetach` | Array mode escapes each argument with `escapeshellarg()`; Windows support with `escapeshellcmd()` |
-| Arbitrary `ini_set` | Constructor | Only directives in `ALLOWED_INI_SETTINGS` are applied; unknown ones are logged via `error_log` and skipped |
-| Credential leaking | `curlRequest` logs | Credentials stripped from logged URLs; body truncated to 500 chars in logs |
-| DNS rebinding | `curlRequest` | ⚠️ Known limitation: TOCTOU between DNS resolution and request — not fully preventable at application level |
-
-## Naming
-
-- Public methods: camelCase (`addRoute`, `configGet`, `getBodyRequest`).
-- Private methods: camelCase (`normalizeRoutePath`, `removeBasePathPrefix`).
-- No strict convention on method parameter ordering, but handlers receive `($app, $params)`.
-
-## Route Handler Signature
-
-Handlers registered via `addRoute` receive exactly two arguments:
-
-```php
-function (NanoCore $app, array $params): mixed
-```
-
-`$params` is a merge of query string parameters + extracted path parameters. Path params override query params on collision.
+All guards are catalogued in [integrations/index.md](integrations/index.md).

@@ -1,168 +1,69 @@
-> Read this when using NanoORM for database operations.
+> Read this when you write CRUD, queries, joins, pagination, transactions, or migrations with NanoORM.
 
-# NanoORM Usage Pattern
+# NanoORM Usage
 
-## Setup
+Contract: [orm/spec.md](../orm/spec.md). Conventions: [conventions-database.md](../conventions-database.md).
+
+## CRUD
 
 ```php
-$pdo = new PDO('sqlite:app.db');
-$orm = new NanoORM($pdo, 'users');                    // PK defaults to 'id'
-$orm = new NanoORM($pdo, 'user_settings', 'user_id'); // Custom PK
+$users = new NanoORM($pdo, 'users');               // PK 'id'
 
-// Both table name and primary key are validated — must match /^[a-zA-Z_][a-zA-Z0-9_]*$/
-// Invalid: new NanoORM($pdo, 'my-table') → InvalidArgumentException
-// Invalid: new NanoORM($pdo, 'users', '1bad') → InvalidArgumentException
+$user = (clone $users)->fillOnly($input, ['name', 'email']);
+$user->save();                                     // INSERT, id from lastInsertId()
+
+$found = $users->findById($user->getId());         // clone or null
+$found->status = 'active';
+$found->save();                                    // UPDATE all fields in $data
+
+$found->delete();                                  // record reset, isNew() = true
+$n = $users->deleteWhere('status = ?', ['banned']);
 ```
 
-## CRUD Examples
+Use `clone` (or `clear()`) to start a new record from a configured instance — the schema is reused.
 
-### Create
-
-```php
-$user = new NanoORM($pdo, 'users');
-$user->fill(['name' => 'Jane', 'email' => 'jane@example.com']);
-$user->save();              // INSERT, auto-fills PK via lastInsertId()
-echo $user->getId();        // The new ID
-```
-
-### Read
+## Queries
 
 ```php
-$user = (new NanoORM($pdo, 'users'))->findById(1);
-echo $user->name;           // Magic getter
-
-$actives = (new NanoORM($pdo, 'users'))->findBy('status', 'active', 10);
-// Returns array of NanoORM instances
-
-$recent = (new NanoORM($pdo, 'posts'))->findAll(
-    ['published' => 1],
-    'created_at DESC',
-    10
-);
-```
-
-### Update
-
-```php
-$user = (new NanoORM($pdo, 'users'))->findById(1);
-$user->email = 'new@example.com';
-$user->save();              // UPDATE because isNew is false
-```
-
-### Delete
-
-```php
-$user = (new NanoORM($pdo, 'users'))->findById(1);
-$user->delete();            // DELETE by PK
-
-(new NanoORM($pdo, 'users'))->deleteWhere(['status' => 'inactive']);
-// Returns number of deleted rows
+$rows = $users->findAll('status = ?', ['active'], 'created_at DESC', 20);
+$page = $users->paginate(2, 20, 'status = ?', ['active'], 'id DESC');
 ```
 
 ## Joins
 
 ```php
 $orders = new NanoORM($pdo, 'orders');
-$orders
-    ->addJoin('users', 'user_id', 'id', 'INNER', ['name', 'email'])
-    ->addJoin('products', 'product_id', 'id', 'LEFT', ['title', 'price']);
-
-$rows = $orders->fetchWithJoins(['status' => 'completed']);
-// $rows is array of assoc arrays with aliased fields:
-// ['id' => 1, 'status' => 'completed', 'j0_name' => 'Jane', 'j1_title' => 'Widget', ...]
-
-// Note: condition keys must be plain field names (no table prefixes, no dots).
-// Invalid: ['orders.status' => 'completed'] → InvalidArgumentException (dot not allowed)
-// For ambiguous column names with JOINs, use fetchWithJoins() without conditions and filter in PHP.
+$rows = $orders
+    ->addJoin('products', 'product_id', 'id', 'LEFT', ['title', 'price'])
+    ->fetchWithJoins(['status' => 'paid']);        // keys: orders cols + j0_title, j0_price
+$orders->clear();                                  // drop joins before paginate()
 ```
-
-## State Methods
-
-```php
-$orm->isNew();      // bool — true if not yet saved
-$orm->getId();      // PK value or null
-$orm->getTable();   // Table name string
-$orm->toArray();    // All field data as array
-$orm->clear();      // Reset to fresh state (clears data, joins, sets isNew)
-isset($orm->name);   // __isset — check if field is set
-unset($orm->name);   // __unset — remove field from data
-```
-
-## Important Notes
-
-- `__set` throws `\InvalidArgumentException` for fields not in the discovered schema — both direct assignment and `fill()` reject unknown fields.
-- `findById`, `findBy`, and `findAll` all return cloned instances — modifying one does not affect others.
-- `fetchWithJoins` returns raw arrays, not ORM instances.
-- `save()` decides insert vs update based on `isNew` flag, not PK presence.
-- `deleteWhere([])` throws — empty conditions are rejected as a safety measure against accidental full-table deletes.
-- Field names in conditions (`findBy`, `findAll`, `deleteWhere`, `fetchWithJoins`) are validated — must be plain identifiers matching `/^[a-zA-Z_][a-zA-Z0-9_]*$/`. Dotted names like `table.column` are rejected.
-- `addJoin()` validates all parameters: table, keys must be valid identifiers; type must be one of `INNER`, `LEFT`, `RIGHT`, `FULL`, `CROSS`. Select fields are also validated — each field (except `*` wildcard) must match `/^[a-zA-Z_][a-zA-Z0-9_]*$/`.
-- `findAll()` sanitizes ORDER BY — column names are validated segment by segment, directions must be valid SQL keywords. Invalid input throws `InvalidArgumentException`.
-
-## Pagination
-
-```php
-$orm = new NanoORM($pdo, 'posts');
-
-$result = $orm->paginate(page: 1, perPage: 10, conditions: ['published' => 1], orderBy: 'created_at DESC');
-// $result = [
-//     'data'      => [...],     // array of NanoORM instances
-//     'total'     => 42,
-//     'page'      => 1,
-//     'per_page'  => 10,
-//     'last_page' => 5,
-// ]
-```
-
-- `$page` and `$perPage` must be >= 1 (throws `InvalidArgumentException` otherwise).
-- `last_page` is always >= 1 (even with zero results).
-- Throws `\Exception` if JOINs are registered — paginate does not support joined queries.
 
 ## Transactions
 
 ```php
-$orm = new NanoORM($pdo, 'orders');
-
-// Manual transaction
-$orm->beginTransaction();
-try {
-    $orm->fill(['product' => 'Widget', 'qty' => 5])->save();
-    $orm->commit();
-} catch (\Throwable $e) {
-    $orm->rollback();
-    throw $e;
-}
-
-// Automatic transaction
-$orm->transaction(function () use ($orm) {
-    $orm->fill(['product' => 'Gadget', 'qty' => 3])->save();
-    // Auto-commits on success, auto-rolls back on \Throwable
+$users->transaction(function () use ($users, $data) {
+    $users->fill($data)->save();
+    // throw to roll back
 });
 ```
 
-- ⚠️ MySQL DDL statements cause implicit commit — they cannot be rolled back.
-
 ## Migrations
 
+1. Create `migrations/NNN_description.sql` (zero-padded number, `[a-zA-Z0-9_]` only).
+2. Optional: `migrations/rollback/NNN_description.sql` with the inverse SQL.
+3. Run:
+
 ```php
-// Run all pending migrations — returns array of newly applied migration file names
-NanoORM::migrateDir('/path/to/migrations', $pdo);
-
-// Roll back the last N migrations (default: 1)
-NanoORM::rollbackDir('/path/to/migrations', $pdo, steps: 2);
-
-// Rollback files must exist in $dir/rollback/ subdirectory
-// e.g., $dir/rollback/2025_01_15_10_30_00_create_users.sql
-
-// Check migration status
-$status = NanoORM::migrationStatus('/path/to/migrations', $pdo);
-// Returns ['applied' => [...], 'pending' => [...]] — two arrays of migration file names
+$applied = NanoORM::migrateDir($pdo, __DIR__ . '/migrations');
+$undone  = NanoORM::rollbackDir($pdo, __DIR__ . '/migrations', 1);
+$status  = NanoORM::migrationStatus($pdo, __DIR__ . '/migrations');
 ```
 
-- File naming: must match `/^\d+_[a-zA-Z0-9_]+\.sql$/` — a numeric prefix followed by underscore and alphanumeric/underscore name. Convention is `YYYY_MM_DD_HH_MM_SS_name.sql` (e.g., `2025_01_15_10_30_00_create_users.sql`), but any numeric prefix is accepted.
-- Invalid file names throw `InvalidArgumentException`.
-- `migrateDir` returns `array` — list of newly applied migration file names.
-- `rollbackDir` accepts an optional `$steps` parameter (default 1) to roll back multiple migrations. Rollback SQL files must exist in `$migrationsDir/rollback/` subdirectory with the same filename as the original migration. Returns `array` — list of rolled-back migration file names.
-- `migrationStatus` returns `['applied' => [...], 'pending' => [...]]` — two arrays of migration file names.
-- `executeSqlFile` is a private static method. Takes a SQL content string (not a file path). Uses naive splitting on `;` — does not handle semicolons inside string literals or comments. For SQLite: executes each statement individually without transaction wrapping. For other drivers: wraps all statements in a transaction (commit on success, rollback on failure).
-- Driver detection: checks `PDO::ATTR_DRIVER_NAME` for SQLite vs MySQL dialect.
+4. Never rename or edit an applied migration file; add a new one.
+
+## Changing NanoORM itself
+
+1. Keep public/protected signatures stable (subclasses exist); add new methods instead of new params.
+2. Every new identifier input → `validateIdentifier()`/`validateFieldName()`; values → placeholders.
+3. Test on SQLite (`createMemoryPDO()` + `prepareSchema()`), update [orm/spec.md](../orm/spec.md) and README → NanoORM.

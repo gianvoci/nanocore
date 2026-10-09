@@ -2,37 +2,37 @@
 
 ## Breaking Changes
 
-### 1. `curlRequest` — firma cambiata da `string $url` a `string|array $url`
+### 1. `curlRequest` — signature changed from `string $url` to `string|array $url`
 
-**Prima**: `curlRequest(string $url, array $options = []): mixed` — accettava solo una stringa URL.
+**Before**: `curlRequest(string $url, array $options = []): mixed` — accepted only a single URL string.
 
-**Dopo**: `curlRequest(string|array $url, array $options = []): mixed` — accetta `string` per singola richiesta o `array` di URL stringhe per batch parallelo via `curl_multi`. In batch mode, le opzioni sono condivise per tutte le URL. La signature PHP è cambiata da `string` a `string|array`.
+**After**: `curlRequest(string|array $url, array $options = []): mixed` — accepts a `string` for a single request or an `array` of URL strings for a parallel batch via `curl_multi`. In batch mode, options are shared across all URLs. The PHP signature changed from `string` to `string|array`.
 
 ```php
-// PRIMA — solo stringa
+// BEFORE — string only
 $result = NanoCore::curlRequest('https://api.example.com/data');
 
-// DOPO — stringa funziona ancora (backward compatibile)
+// AFTER — string still works (backward compatible)
 $result = NanoCore::curlRequest('https://api.example.com/data');
 
-// NUOVO — array per batch parallelo
+// NEW — array for parallel batch
 $results = NanoCore::curlRequest([
     'https://api.example.com/users',
     'https://api.example.com/posts',
 ]);
-// $results = [body1, body2] — in ordine di input
-// Con with_info: [['body'=>..., 'status'=>200], ['body'=>..., 'status'=>200]]
+// $results = [body1, body2] — in input order
+// With with_info: [['body'=>..., 'status'=>200], ['body'=>..., 'status'=>200]]
 ```
 
-**Action**: Nessuna modifica necessaria se passi una stringa — funziona come prima. Type checker che impongono `string` stretto potrebbero segnalare un errore con la nuova union type — aggiorna le dichiarazioni di tipo nei wrapper.
+**Action**: No change needed if you pass a string — it works as before. Type checkers that enforce a strict `string` may report an error with the new union type — update the type declarations in your wrappers.
 
 ---
 
-## Nuove Feature
+## New Features
 
-### 2. Batch parallelo con `curl_multi`
+### 2. Parallel batch with `curl_multi`
 
-`curlRequest` ora accetta un array di URL. Le richieste sono eseguite in parallelo via `curl_multi` con un massimo di 10 handle concorrenti. URL eccedenti sono accodate automaticamente (al termine di una richiesta parte la successiva). I risultati sono restituiti in un array nello stesso ordine delle URL di input.
+`curlRequest` now accepts an array of URLs. Requests are executed in parallel via `curl_multi` with a maximum of 10 concurrent handles. Excess URLs are automatically queued (when one request completes, the next one starts). Results are returned in an array in the same order as the input URLs.
 
 ```php
 $urls = [
@@ -46,34 +46,34 @@ $results = NanoCore::curlRequest($urls, ['with_info' => true]);
 // $results[2] = ['body' => [...], 'status' => 200, ...]
 ```
 
-### 3. Retry per-request non-blocking
+### 3. Non-blocking per-request retry
 
-Ogni richiesta ha fino a 5 tentativi totali (iniziale + 4 retry). Backoff lineare: 100ms, 200ms, 300ms, 400ms. Il retry è non-blocking: in batch mode, se una richiesta fallisce, l'handle viene rimosso dal multi handle, registrato per retry, e le altre richieste continuano a processare. Allo scadere del timer, l'handle viene re-inizializzato e re-aggiunto.
+Each request has up to 5 total attempts (initial + 4 retries). Linear backoff: 100ms, 200ms, 300ms, 400ms. The retry is non-blocking: in batch mode, if a request fails, its handle is removed from the multi handle, registered for retry, and the other requests keep processing. When the timer expires, the handle is re-initialized and re-added.
 
-### 4. Batch failures gracefuli
+### 4. Graceful batch failures
 
-In batch mode, se una URL fallisce dopo tutti i tentativi, l'elemento corrispondente nell'array risultati è un oggetto `Exception`. Le altre richieste non vengono abortite.
+In batch mode, if a URL fails after all attempts, the corresponding element in the results array is an `Exception` object. The other requests are not aborted.
 
 ```php
 $results = NanoCore::curlRequest([
     'https://httpbin.org/get',
-    'http://nonexistent.invalid',  // fallirà
+    'http://nonexistent.invalid',  // will fail
 ]);
 // $results[0] = '...body...' (string)
 // $results[1] = Exception('External request failed')
 ```
 
-Per le singole URL (stringa singola), il comportamento resta invariato: fallimento lancia eccezione.
+For single URLs (a single string), the behavior is unchanged: a failure throws an exception.
 
-### 5. Array vuoto
+### 5. Empty array
 
-`NanoCore::curlRequest([], $options)` ritorna `[]` immediatamente senza fare richieste HTTP.
+`NanoCore::curlRequest([], $options)` returns `[]` immediately without making any HTTP requests.
 
 ---
 
 ## Migration Checklist
 
-- [ ] Nessuna modifica al codice consumer richiesta — `curlRequest` con `string` funziona come prima
-- [ ] Se usi type declaration nei wrapper di `curlRequest`, aggiorna da `string` a `string|array`
-- [ ] Per usare il batch parallelo, passa un array di URL — i risultati sono nello stesso ordine delle URL di input
-- [ ] Gestisci `Exception` nei risultati batch se alcune URL possono fallire
+- [ ] No changes to consumer code required — `curlRequest` with `string` works as before
+- [ ] If you use type declarations in `curlRequest` wrappers, update from `string` to `string|array`
+- [ ] To use parallel batch, pass an array of URLs — results are in the same order as the input URLs
+- [ ] Handle `Exception` in batch results if some URLs may fail

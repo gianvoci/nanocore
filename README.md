@@ -249,6 +249,7 @@ $app->sessionStart();                          // Idempotent — safe to call mu
 $app->sessionSet('user_id', 42);
 $userId = $app->sessionGet('user_id');         // → 42
 $userId = $app->sessionGet('user_id', 0);      // → 42 (with default)
+$app->sessionRegenerate();                     // New session ID (call after login)
 $app->sessionDestroy();
 ```
 
@@ -261,8 +262,9 @@ Config keys read from `.env`:
 | `SESSION.COOKIE_HTTPONLY` | HTTP-only cookie (no JS access) |
 | `SESSION.COOKIE_SECURE` | HTTPS-only cookie |
 | `SESSION.USE_STRICT_MODE` | Reject uninitialized session IDs |
+| `SESSION.COOKIE_SAMESITE` | `Lax`, `Strict` or `None` (other values throw) |
 
-Only these 3 keys are read by `sessionStart()`. Other `SESSION.*` keys (e.g. `AUTO_START`, `NAME`, `LIFETIME`, `PATH`, `DOMAIN`) are not yet implemented.
+Only these 4 keys are read by `sessionStart()`. Other `SESSION.*` keys (e.g. `AUTO_START`, `NAME`, `LIFETIME`, `PATH`, `DOMAIN`) are not yet implemented.
 
 `sessionStart()` is idempotent. `sessionDestroy()` guards for active session.
 
@@ -351,6 +353,9 @@ $user = new NanoORM($pdo, 'users');
 $user->fill(['name' => 'Jane', 'email' => 'jane@example.com']);
 $user->save();
 echo $user->getId();  // Auto-generated ID
+
+// With request input, whitelist assignable fields (others are skipped)
+$user->fillOnly($input, ['name', 'email']);
 ```
 
 Read:
@@ -472,6 +477,7 @@ Join types: `INNER`, `LEFT`, `RIGHT`, `FULL`, `CROSS`.
 | Method | Returns | Description |
 | --- | --- | --- |
 | `fill(array $data)` | `self` | Set multiple fields at once |
+| `fillOnly(array $data, array $allowed)` | `self` | Like `fill()`, skipping keys not in `$allowed` (mass-assignment protection) |
 | `save()` | `bool` | Insert (new) or update (existing) |
 | `delete()` | `bool` | Delete current record by PK |
 | `deleteWhere($where, $params)` | `int` | Delete matching records with WHERE clause, returns affected rows |
@@ -556,9 +562,9 @@ Features:
 - Request logging to `nanocore.log` (method, URL, status code, duration, params, response)
 - Up to 5 retries with linear backoff (100ms, 200ms, 300ms...)
 - 30s connect timeout, 30s total timeout (overridable via CURLOPT)
-- SSRF protection: only `http`/`https` schemes, blocks private/restricted IPs, resolves DNS to validate
+- SSRF protection: only `http`/`https` schemes, blocks private/restricted IPs, resolves DNS (A + AAAA) to validate
 - `CURLOPT_FOLLOWLOCATION` forced `false` for SSRF safety
-- Credentials stripped from logged URLs
+- Credentials stripped from logged URLs; sensitive `params` keys (`password`, `token`, `secret`, `key`, `auth`, `credential`) masked as `***` in logged params and query strings
 - Response body truncated to 500 chars in logs
 - Retry reinitializes the curl handle between attempts (`curl_init`). CurlHandle objects are freed automatically.
 
@@ -642,7 +648,7 @@ $html = $app->renderHtml('templates/user.html', [
 ]);
 ```
 
-- Template path is validated (must be within project root, `DIRECTORY_SEPARATOR` appended to root path)
+- Template path is validated (must be within the project root (`basePath`/cwd) or the `.env` directory, `DIRECTORY_SEPARATOR` appended to root path); the `.env` file itself is always rejected
 - String values are HTML-escaped by default (prevents XSS)
 - Pass `false` as third argument to disable escaping: `$app->renderHtml($file, $data, false)`
 
@@ -683,7 +689,7 @@ NanoCore has security protections built in:
 
 | Protection | Where | Description |
 | --- | --- | --- |
-| **SSRF Prevention** | `curlRequest`, `validateUrlNotRestricted`, `validateIpNotRestricted` | Only http/https URLs. Blocks private IPs, localhost, restricted ranges, IPv6 brackets. DNS resolution checked. `FOLLOWLOCATION` disabled. |
+| **SSRF Prevention** | `curlRequest`, `validateUrlNotRestricted`, `validateIpNotRestricted` | Only http/https URLs. Blocks private IPs, localhost, restricted ranges, IPv6 brackets. DNS resolution (A + AAAA) checked. `FOLLOWLOCATION` disabled. |
 | **CRLF Injection** | `redirect()` | CR/LF characters stripped from redirect URLs |
 | **Path Traversal** | `renderHtml()` | `DIRECTORY_SEPARATOR` appended to root path prevents traversal |
 | **SQL Injection** | NanoORM | All identifiers validated. Field names backtick-quoted in queries. PDO prepared statements for all values. Note: `findBy()`/`findAll()`/`deleteWhere()` accept arbitrary WHERE — caller must ensure safe SQL. |
@@ -693,7 +699,7 @@ NanoCore has security protections built in:
 | **Arbitrary ini_set** | Constructor | Only 13 safe PHP directives are allowed. |
 | **Error Disclosure** | Error handlers | No file paths or line numbers in error responses. |
 | **Throwable Catching** | `run()` | Catches `\Throwable` not just `\Exception` |
-| **Credential Logging** | `curlRequest` | Credentials stripped from logged URLs |
+| **Credential Logging** | `curlRequest` | Credentials stripped from logged URLs; sensitive params/query values masked |
 | **Response Log Truncation** | `curlRequest` | Response body truncated to 500 chars in logs |
 
 ### Known Limitations
@@ -708,9 +714,10 @@ NanoCore has security protections built in:
 
 NanoCore registers custom handlers on construction:
 
-- All PHP errors are converted to `ErrorException`
+- PHP errors are converted to `ErrorException` (except errors suppressed with the `@` operator)
 - Uncaught exceptions return JSON with appropriate HTTP status
 - No internal paths leaked in responses
+- Set `CORE.EXPOSE_ERRORS=false` in `.env` (recommended in production) to replace 5xx messages with `Internal Server Error`; the real message is logged to `nanocore.log`. Default `true`.
 - All JSON responses use `JSON_THROW_ON_ERROR` to prevent silent encoding failures
 - `run()` catches `\Throwable` (not just `\Exception`)
 

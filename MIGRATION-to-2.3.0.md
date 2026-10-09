@@ -2,83 +2,83 @@
 
 ## Breaking Changes
 
-### 1. `findBy()` / `findAll()` — nuova firma, ritorna `array<array>`
+### 1. `findBy()` / `findAll()` — new signature, returns `array<array>`
 
-**Before**: `findBy(string $field, mixed $value, int $limit = 0): array` — ritornava array di istanze NanoORM. `findAll(array $conds, string $orderBy = '', int $limit = 0): array` — ritornava array di istanze NanoORM.
+**Before**: `findBy(string $field, mixed $value, int $limit = 0): array` — returned an array of NanoORM instances. `findAll(array $conds, string $orderBy = '', int $limit = 0): array` — returned an array of NanoORM instances.
 
-**After**: `findBy(string $where, array $params = [], ?int $limit = null): array` — ritorna `array<array>` (array associativi). `findAll(string $where = '', array $params = [], string $orderBy = '', ?int $limit = null): array` — ritorna `array<array>`. Passare `0` per "nessun limite" non funziona più — usa `null`.
+**After**: `findBy(string $where, array $params = [], ?int $limit = null): array` — returns `array<array>` (associative arrays). `findAll(string $where = '', array $params = [], string $orderBy = '', ?int $limit = null): array` — returns `array<array>`. Passing `0` for "no limit" no longer works — use `null`.
 
-Nessuna validazione del campo nella WHERE — il chiamante è responsabile della sicurezza SQL.
+No field validation in the WHERE clause — the caller is responsible for SQL safety.
 
 ```php
-// BEFORE — field/value, ritornava istanze NanoORM
+// BEFORE — field/value, returned NanoORM instances
 $users = $orm->findBy('status', 'active', 10);
-echo $users[0]->name;  // accesso oggetto
+echo $users[0]->name;  // object access
 
-// AFTER — WHERE clause, ritorna array associativi
+// AFTER — WHERE clause, returns associative arrays
 $users = $orm->findBy('status = ?', ['active'], 10);
-echo $users[0]['name'];  // accesso array
+echo $users[0]['name'];  // array access
 ```
 
-**Action**: Sostituisci tutte le chiamate `findBy()` e `findAll()` con la nuova firma. Cambia l'accesso oggetto (`$row->field`) in accesso array (`$row['field']`).
+**Action**: Replace all `findBy()` and `findAll()` calls with the new signature. Change object access (`$row->field`) to array access (`$row['field']`).
 
-### 2. `paginate()` — ritorna `array<array>` nel campo `data`
+### 2. `paginate()` — returns `array<array>` in the `data` field
 
-**Before**: `$result['data']` conteneva array di istanze NanoORM. Firma: `paginate(int $page, int $perPage, array $conds = [], string $orderBy = '')`.
+**Before**: `$result['data']` contained an array of NanoORM instances. Signature: `paginate(int $page, int $perPage, array $conds = [], string $orderBy = '')`.
 
-**After**: `$result['data']` contiene array di array associativi. Firma: `paginate(int $page, int $perPage, string $where = '', array $params = [], string $orderBy = '')`.
+**After**: `$result['data']` contains an array of associative arrays. Signature: `paginate(int $page, int $perPage, string $where = '', array $params = [], string $orderBy = '')`.
 
 ```php
-// BEFORE — istanze NanoORM in data
+// BEFORE — NanoORM instances in data
 $result = $orm->paginate(1, 25, ['status' => 'active'], 'name ASC');
-$result['data'][0]->name;  // accesso oggetto
+$result['data'][0]->name;  // object access
 
-// AFTER — array associativi in data
+// AFTER — associative arrays in data
 $result = $orm->paginate(1, 25, 'status = ?', ['active'], 'name ASC');
-$result['data'][0]['name'];  // accesso array
+$result['data'][0]['name'];  // array access
 ```
 
-**Action**: Cambia le chiamate `paginate()` alla nuova firma. Cambia l'accesso oggetto sugli elementi di `$result['data']` in accesso array.
+**Action**: Update `paginate()` calls to the new signature. Change object access on the elements of `$result['data']` to array access.
 
-### 3. `hydrate()` → `fromArray()` — ora pubblico con validazione campi
+### 3. `hydrate()` → `fromArray()` — now public with field validation
 
-**Before**: `hydrate()` era private, usato internamente da `findById()`.
+**Before**: `hydrate()` was private, used internally by `findById()`.
 
-**After**: `fromArray(array $row): self` è pubblico. Valida i campi contro lo schema — i campi sconosciuti lanciano `\InvalidArgumentException("Unknown field: {$key}")`.
+**After**: `fromArray(array $row): self` is public. Validates fields against the schema — unknown fields throw `\InvalidArgumentException("Unknown field: {$key}")`.
 
 ```php
-// AFTER — metodo pubblico, valida i campi
+// AFTER — public method, validates fields
 $user = (new NanoORM($pdo, 'users'))->fromArray(['name' => 'Test', 'email' => 'a@b.c']);
-// campi sconosciuti NON sono ammessi:
+// unknown fields are NOT allowed:
 // (new NanoORM($pdo, 'users'))->fromArray(['unknown' => 'x']);  // → \InvalidArgumentException
 ```
 
-**Action**: Usa `fromArray()` per idratazione manuale. Per dati JOIN con campi extra, usa `fetchWithJoins()` invece.
+**Action**: Use `fromArray()` for manual hydration. For JOIN data with extra fields, use `fetchWithJoins()` instead.
 
-### 4. `deleteWhere()` — nuova firma con WHERE arbitraria
+### 4. `deleteWhere()` — new signature with arbitrary WHERE
 
-**Before**: `deleteWhere(array $conds): int` — array associativo di condizioni.
+**Before**: `deleteWhere(array $conds): int` — associative array of conditions.
 
-**After**: `deleteWhere(string $where, array $params = []): int` — clausola WHERE con params. WHERE vuoto lancia `\Exception` (guardia di sicurezza).
+**After**: `deleteWhere(string $where, array $params = []): int` — WHERE clause with params. An empty WHERE throws `\Exception` (safety guard).
 
 ```php
-// BEFORE — array associativo
+// BEFORE — associative array
 $orm->deleteWhere(['status' => 'inactive']);
 
-// AFTER — clausola WHERE
+// AFTER — WHERE clause
 $orm->deleteWhere('status = ?', ['inactive']);
-$orm->deleteWhere('');  // → \Exception (sicurezza: previene delete accidentale di tutto)
+$orm->deleteWhere('');  // → \Exception (safety: prevents accidental deletion of all rows)
 ```
 
-Per cancellare tutte le righe intenzionalmente: `deleteWhere('1=1')`.
+To intentionally delete all rows: `deleteWhere('1=1')`.
 
-**Action**: Sostituisci `deleteWhere(['field' => 'value'])` con `deleteWhere('field = ?', ['value'])`. Se devi cancellare tutte le righe, usa `deleteWhere('1=1')`.
+**Action**: Replace `deleteWhere(['field' => 'value'])` with `deleteWhere('field = ?', ['value'])`. If you need to delete all rows, use `deleteWhere('1=1')`.
 
-### 5. Middleware riceve `$route` e `$method`
+### 5. Middleware receives `$route` and `$method`
 
-**Before**: La signature del callback middleware era `function ($app, $params, $next)`.
+**Before**: The middleware callback signature was `function ($app, $params, $next)`.
 
-**After**: Il callback middleware riceve due parametri aggiuntivi: `function ($app, $params, $next, $route, $method)`.
+**After**: The middleware callback receives two additional parameters: `function ($app, $params, $next, $route, $method)`.
 
 ```php
 // BEFORE
@@ -91,72 +91,72 @@ $app->addMiddleware(function ($app, $params, $next, $route, $method) {
 });
 ```
 
-**Action**: I middleware esistenti con 3 parametri funzionano ancora (PHP permette argomenti extra). Aggiorna la signature se vuoi usare `$route`/`$method`.
+**Action**: Existing middleware with 3 parameters still works (PHP allows extra arguments). Update the signature if you want to use `$route`/`$method`.
 
-### 6. `getBodyRequest()` — cache e auto-detect Content-Type
+### 6. `getBodyRequest()` — caching and Content-Type auto-detection
 
-**Before**: Ogni chiamata rileggeva `php://input`. Solo JSON era supportato.
+**Before**: Every call re-read `php://input`. Only JSON was supported.
 
-**After**: La prima chiamata legge e cache in `$storage['__nc_body']`. Auto-detect del Content-Type: JSON, form-urlencoded, multipart/form-data. `$maxBytes` ha effetto solo sulla prima chiamata. Nuovo parametro `$validateContentType` (secondo argomento, default `false`): quando `true`, richiede Content-Type `application/json` e lancia eccezione se non corrisponde. Content-Type sconosciuti: tentativo di decode JSON, poi fallback a stringa raw.
+**After**: The first call reads and caches in `$storage['__nc_body']`. Content-Type auto-detection: JSON, form-urlencoded, multipart/form-data. `$maxBytes` only takes effect on the first call. New parameter `$validateContentType` (second argument, default `false`): when `true`, requires Content-Type `application/json` and throws an exception if it does not match. Unknown Content-Types: attempts JSON decode, then falls back to raw string.
 
 ```php
-// BEFORE — sempre JSON, nessuna cache
+// BEFORE — always JSON, no cache
 $body = $app->getBodyRequest();
 
 // AFTER — cached, auto-detect Content-Type
-$body = $app->getBodyRequest();  // prima chiamata: legge + cache
-$body = $app->getBodyRequest();  // chiamate successive: ritorna cache
+$body = $app->getBodyRequest();  // first call: reads + caches
+$body = $app->getBodyRequest();  // subsequent calls: return cache
 ```
 
-**Action**: Se facevi affidamento su chiamate multiple a `getBodyRequest()` con `$maxBytes` diversi, solo il limite della prima chiamata viene applicato. Se facevi affidamento sul rifiuto di body non-JSON, ora vengono auto-parsati. Se hai bisogno di imporre `application/json`, passa `true` come secondo argomento: `$app->getBodyRequest(null, true)`.
+**Action**: If you relied on multiple `getBodyRequest()` calls with different `$maxBytes`, only the first call's limit is applied. If you relied on non-JSON bodies being rejected, they are now auto-parsed. If you need to enforce `application/json`, pass `true` as the second argument: `$app->getBodyRequest(null, true)`.
 
-### 7. Nuovo metodo `require(string $key): mixed`
+### 7. New method `require(string $key): mixed`
 
-Accesso fail-fast alle proprietà. Controlla `$storage` poi le proprietà virtuali (`body`, `cli`). Lancia `RuntimeException` per chiavi sconosciute.
+Fail-fast property access. Checks `$storage` and then virtual properties (`body`, `cli`). Throws `RuntimeException` for unknown keys.
 
 ```php
 $pdo = $app->require('pdo');
-$body = $app->require('body');   // proprietà virtuale
-$cli = $app->require('cli');     // proprietà virtuale
+$body = $app->require('body');   // virtual property
+$cli = $app->require('cli');     // virtual property
 $app->require('nonexistent');     // → RuntimeException
 ```
 
-**Action**: Usa `require()` invece del pattern `isset` + accesso per valori di config obbligatori.
+**Action**: Use `require()` instead of the `isset` + access pattern for required config values.
 
-### 8. `execDetach()` — fix Windows
+### 8. `execDetach()` — Windows fix
 
-**Before**: Su Windows, `execDetach()` poteva mostrare finestre popup o bloccare.
+**Before**: On Windows, `execDetach()` could show popup windows or block.
 
-**After**: Usa `start /B cmd /c "..."` con redirect su log — nessun popup, non-blocking.
+**After**: Uses `start /B cmd /c "..."` with output redirected to a log — no popup, non-blocking.
 
-**Action**: Nessuna modifica al codice necessaria. Solo fix di comportamento.
+**Action**: No code changes required. Behavioral fix only.
 
 ---
 
-## Nuove Protezioni
+## New Protections
 
-Queste non rompono nulla ma cambiano il comportamento a runtime:
+These do not break anything but change runtime behavior:
 
-| Change | Cosa succede |
+| Change | What happens |
 |--------|-------------|
-| `getBodyRequest()` cache | Previene doppia lettura di `php://input` |
-| `require()` throw su chiave mancante | `RuntimeException` invece di null silenzioso |
-| `deleteWhere('')` safety guard | Previene DELETE senza WHERE accidentale |
+| `getBodyRequest()` cache | Prevents double reading of `php://input` |
+| `require()` throws on missing key | `RuntimeException` instead of silent null |
+| `deleteWhere('')` safety guard | Prevents accidental DELETE without WHERE |
 
 ---
 
 ## Migration Checklist
 
-- [ ] Cerca chiamate `findBy('field', 'value')` — sostituisci con `findBy('field = ?', ['value'])` e cambia accesso da oggetto ad array
-- [ ] Cerca chiamate `findAll(['field' => 'value'])` — sostituisci con `findAll('field = ?', ['value'])` e cambia accesso da oggetto ad array
-- [ ] Cerca chiamate `paginate()` con array di condizioni — sostituisci con nuova firma WHERE + params
-- [ ] Cerca accesso oggetto su risultati `paginate()` (`$row->field`) — cambia in accesso array (`$row['field']`)
-- [ ] Cerca usi di `hydrate()` — sostituisci con `fromArray()` (pubblico, lancia `\InvalidArgumentException` per campi sconosciuti)
-- [ ] Cerca chiamate `deleteWhere(['field' => 'value'])` — sostituisci con `deleteWhere('field = ?', ['value'])`
-- [ ] Verifica che `deleteWhere('')` non venga usato per cancellare tutto — usa `deleteWhere('1=1')` se intenzionale
-- [ ] Verifica middleware esistenti — aggiungi `$route` e `$method` alla signature se servono
-- [ ] Cerca chiamate multiple a `getBodyRequest()` con `$maxBytes` diversi — solo il primo ha effetto
-- [ ] Verifica che il parsing di body non-JSON non causi problemi — ora vengono auto-parsati
-- [ ] Sostituisci pattern `isset` + accesso con `require()` per valori di config obbligatori
-- [ ] Cerca chiamate `findBy()`/`findAll()` che passano `0` o `false` come limite — sostituisci con `null` per nessun limite
-- [ ] Esegui la test suite per verificare la compatibilità
+- [ ] Search for `findBy('field', 'value')` calls — replace with `findBy('field = ?', ['value'])` and change access from object to array
+- [ ] Search for `findAll(['field' => 'value'])` calls — replace with `findAll('field = ?', ['value'])` and change access from object to array
+- [ ] Search for `paginate()` calls with a conditions array — replace with the new WHERE + params signature
+- [ ] Search for object access on `paginate()` results (`$row->field`) — change to array access (`$row['field']`)
+- [ ] Search for uses of `hydrate()` — replace with `fromArray()` (public, throws `\InvalidArgumentException` for unknown fields)
+- [ ] Search for `deleteWhere(['field' => 'value'])` calls — replace with `deleteWhere('field = ?', ['value'])`
+- [ ] Verify that `deleteWhere('')` is not used to delete everything — use `deleteWhere('1=1')` if intentional
+- [ ] Verify existing middleware — add `$route` and `$method` to the signature if needed
+- [ ] Search for multiple `getBodyRequest()` calls with different `$maxBytes` — only the first one takes effect
+- [ ] Verify that parsing non-JSON bodies does not cause problems — they are now auto-parsed
+- [ ] Replace the `isset` + access pattern with `require()` for required config values
+- [ ] Search for `findBy()`/`findAll()` calls that pass `0` or `false` as the limit — replace with `null` for no limit
+- [ ] Run the test suite to verify compatibility

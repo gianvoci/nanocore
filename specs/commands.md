@@ -1,69 +1,44 @@
-> Read this when you need to run tests, check syntax, or build the package.
+> Read this when you need to run a syntax check, tests, Composer, or release commands.
 
 # Commands
 
-## Syntax Check
+## Syntax check (after every source change)
 
 ```bash
-php -l NanoCore.php
-php -l NanoORM.php
+php -l src/NanoCore.php
+php -l src/NanoORM.php
 ```
-
-Run after every change to NanoCore.php or NanoORM.php. Required by project conventions.
 
 ## Tests
 
-### Run All Tests
-
 ```bash
-php tests/runAllTests.php
+php tests/runAllTests.php          # all files, each in its own process; exit 0/1
+php tests/cases/RoutesTest.php     # one file; prints "Test N passed/failed: <msg>"
 ```
 
-Discovers and runs all test files in `tests/cases/` via glob. Prints a summary (X/Y passed, Z failed). Exit code 0 if all pass, 1 if any fail.
+| Test file | Needs |
+| --- | --- |
+| `CurlRequestTest.php` | Local PHP built-in server (`createTestServer()`, `php -S localhost:0`) |
+| `UtilitiesTest.php` | Outbound internet (httpbin); guards skip on transient non-200/418 |
+| ORM / Join tests | `pdo_sqlite` (in-memory DB) |
 
-### Run Individual Tests
-
-```bash
-php tests/cases/RoutesTest.php
-php tests/cases/ErrorHandlingTest.php
-php tests/cases/ConfigTest.php
-php tests/cases/RouteEdgeCasesTest.php
-php tests/cases/UtilitiesTest.php
-php tests/cases/ORMTest.php
-php tests/cases/ORMEdgeCasesTest.php
-php tests/cases/JoinTest.php
-php tests/cases/CurlRequestTest.php
-```
-
-All are standalone runners (no PHPUnit). They exit with code 0 on success, 1 on failure. Each test prints pass/fail to stdout.
-
-### Integration Tests
-
-`CurlRequestTest.php` uses `createTestServer()` and `stopTestServer()` from `TestHelpers.php` to spin up a local PHP built-in server for testing real HTTP requests. These tests require a working PHP CLI binary in PATH.
-
-### Test Structure
-
-- `tests/TestHelpers.php` — shared assertion functions, database/route helpers, and the `runTests()` runner
-- `tests/cases/*.php` — individual test files, each defining a `$tests[]` array and calling `runTests($tests)`
-- `tests/runAllTests.php` — orchestrator that discovers all `cases/*.php` files and runs them in separate processes
+Prefer running the single affected file first, then the full suite. Test conventions: [rules/add-test.md](rules/add-test.md).
 
 ## Composer
 
 ```bash
-composer install        # Install dependencies (dev only, no runtime deps beyond PHP 8.5)
-composer dump-autoload  # Regenerate PSR-4 autoload map after adding/moving classes
+composer dump-autoload          # regenerate PSR-4 autoloader (tests require vendor/autoload.php)
+composer require gianvoci/nanocore   # consumer install
 ```
 
-## Consuming in Another Project
+Local path consumption: `"repositories": [{"type": "path", "url": "../nanocore"}]`, `"require": {"gianvoci/nanocore": "@dev"}`.
+
+## Release
 
 ```bash
-composer require gianvoci/nanocore
+git tag --sort=-v:refname | head -1   # latest version (tags use the v prefix, e.g. v2.4.1)
+git tag v{version}
+git push origin main --tags
 ```
 
-Or via local path in `composer.json`:
-```json
-{
-    "repositories": [{"type": "path", "url": "../nanocore"}],
-    "require": {"gianvoci/nanocore": "@dev"}
-}
-```
+Full procedure: [rules/release.md](rules/release.md).

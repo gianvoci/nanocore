@@ -1,105 +1,41 @@
-> Read this when reading or writing config values, or understanding .env structure.
+> Read this when you read/write config, add a config-driven feature, or extend the PHP ini allowlist.
 
-# Config Management Pattern
+# Config Management
 
-## Storage
+Contract: [config/spec.md](../config/spec.md). Trust boundaries: [integrations/env-config.md](../integrations/env-config.md).
 
-Config is persisted in `.env` at the project root. The file is auto-created as empty if it doesn't exist.
-
-The config file path is validated on construction:
-- New files must start with `.env` (e.g. `.env`, `.env.production`) — existing files are accepted as-is
-- Directory is resolved to prevent writing to arbitrary locations
-
-## .env Format
-
-```env
-# This is a comment
-DB.HOST=localhost
-DB.PORT=3306
-APP.NAME=My App
-PHP.INI.display_errors=0
-PHP.INI.date.timezone=Europe/Rome
-
-# Quoted values — surrounding quotes are stripped
-APP.TITLE="My Application"
-APP.DESCRIPTION='Single quoted'
-
-# Inline comments
-APP.DEBUG=true # enabled for dev
-
-# Variable interpolation — ${VAR} resolves to previously loaded values
-DB.URL=${DB.HOST}:${DB.PORT}
-
-# export prefix is silently stripped
-export APP.ENV=production
-
-# Empty value
-APP.SECRET=
-```
-
-Parser rebuilds nested array: `DB.HOST=localhost` → `['DB' => ['HOST' => 'localhost']]`
-
-**All values are strings.** No type coercion. If someone writes `DB.PORT=3306`, `configGet('DB.PORT')` returns `"3306"` (string), not `3306` (int). This is standard .env behavior.
-
-## Dot-Notation Access
+## Read a value
 
 ```php
-// Read
-$dbHost = $app->configGet('DB.HOST');           // Nested: ['DB' => ['HOST' => 'localhost']]
-$iniSettings = $app->configGet('PHP.INI');       // Returns array or null
-
-// Write
-$app->configSet('DB.HOST', 'localhost');         // Creates nested structure automatically
-$app->configSet('DB.PORT', '3306');
+$host = $app->configGet('DB.HOST') ?? 'localhost';   // string|null
+$ini  = $app->configGet('PHP.INI') ?? [];             // prefix → nested array
 ```
 
-## Protected Keys
+Values are always strings: cast booleans with `filter_var($v, FILTER_VALIDATE_BOOLEAN)` (as `sessionStart()` does).
 
-The following top-level keys cannot be modified via `configSet`:
+## Write a value
 
-| Key | Reason |
-| --- | --- |
-| `CORE` | Set automatically by the constructor (`CORE.ROOT`). |
-| `PHP.INI` | Controls server behavior via `ini_set()`. |
+```php
+$app->configSet('APP.MAINTENANCE', 'true');
+```
 
-Attempting `configSet('PHP.INI.display_errors', '1')` will throw an exception.
+- Rewrites the whole `.env` (sorted, comments dropped). Do not use for hand-maintained files that need comments.
+- Encode multi-line data first (`base64_encode` / `json_encode`).
 
-## Special Keys
+## Add a config-driven feature
 
-| Key | Purpose |
-| --- | --- |
-| `CORE.ROOT` | Set automatically by the constructor to the detected base path. Do not set manually. |
-| `PHP.INI` | Group of `ini_set` key-value pairs. Only allowed directives are applied (see `ALLOWED_INI_SETTINGS` constant in NanoCore.php). Unknown directives are logged via `error_log` and skipped. |
-| `SESSION.COOKIE_HTTPONLY` | Sets `session.cookie_httponly` via `ini_set` before `session_start()`. Converted via `filter_var($value, FILTER_VALIDATE_BOOLEAN)`. |
-| `SESSION.COOKIE_SECURE` | Sets `session.cookie_secure` via `ini_set` before `session_start()`. Converted via `filter_var($value, FILTER_VALIDATE_BOOLEAN)`. |
-| `SESSION.USE_STRICT_MODE` | Sets `session.use_strict_mode` via `ini_set` before `session_start()`. Converted via `filter_var($value, FILTER_VALIDATE_BOOLEAN)`. |
+1. Choose a top-level namespace (`SESSION.*`, `DB.*`, ...). Never use `CORE.*` for consumer-writable settings — it is protected.
+2. Read it lazily with `configGet()` at use time; validate allowed values and throw `\InvalidArgumentException` before any side effect (pattern: `SESSION.COOKIE_SAMESITE`).
+3. Default must preserve current behavior when the key is absent.
+4. Document the key in `README.md` → Configuration, in [config/spec.md](../config/spec.md), and in `.env.example` if it is commonly set.
 
-## INI Allowlist
+## Allow a new `PHP.INI.*` directive
 
-Only the following PHP directives may be set through `PHP.INI`. Anything else is logged via `error_log` and skipped:
+1. Justify it as non-dangerous (no `open_basedir`, `disable_functions`, `auto_prepend_file`, `allow_url_*`, extension loading).
+2. Append it to `ALLOWED_INI_SETTINGS` (`src/NanoCore.php:29`).
+3. Update the count/list in [config/spec.md](../config/spec.md#constants) and the README Security table.
+4. Add a test in `tests/cases/ConfigTest.php` that saves and restores the ini value.
 
-| Directive |
-| --- |
-| `display_errors` |
-| `error_log` |
-| `error_reporting` |
-| `log_errors` |
-| `upload_max_filesize` |
-| `post_max_size` |
-| `max_execution_time` |
-| `memory_limit` |
-| `default_charset` |
-| `date.timezone` |
-| `session.cookie_httponly` |
-| `session.cookie_secure` |
-| `session.use_strict_mode` |
+## Add a protected key
 
-This is enforced in the `ALLOWED_INI_SETTINGS` constant. To add a new directive, update the constant in `NanoCore.php`.
-
-## Implementation Details
-
-- Config is cached in memory after first load. `configGet` returns from cache on subsequent calls.
-- `configSet` reads → modifies → writes the file, then updates the cache only on successful write.
-- `saveConfig` uses atomic writes (temp file + rename) to prevent data corruption.
-- `saveConfig` flattens nested arrays to dot-notation keys and writes them sorted alphabetically.
-- Config file path is configurable: `new NanoCore('custom.env')`.
+Append to `PROTECTED_CONFIG_KEYS`; `configSet()` blocks the key, its children, and ancestors automatically. This is a breaking change for consumers writing that key.
