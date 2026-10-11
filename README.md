@@ -40,6 +40,18 @@ Or via local path in `composer.json`:
 }
 ```
 
+## Upgrading
+
+Every release ships a `MIGRATION-to-{version}.md` file in the [repository root](https://github.com/gianvoci/nanocore): the official upgrade guide for that version.
+
+After updating `gianvoci/nanocore` (the package includes both `NanoCore` and `NanoORM`), you **must** read the migration guide for the new version before deploying:
+
+1. Open the `MIGRATION-to-*.md` matching the version you land on (e.g. `MIGRATION-to-2.6.0.md`).
+2. Apply every **Action** listed under **Behavior Changes** — they are required.
+3. Complete the **Migration Checklist**, then run your test suite.
+
+Jumping multiple versions? Read each guide between your current and target version, oldest first.
+
 ## Quick Start
 
 Create `index.php`:
@@ -531,6 +543,20 @@ $result = NanoCore::curlRequest('https://api.example.com/stream', [
     CURLOPT_WRITEFUNCTION  => $callback,  // Streaming — callback receives chunks
 ]);
 
+// POST a JSON body — Content-Type set automatically (2.7.0)
+$result = NanoCore::curlRequest('https://api.example.com/users', [
+    'method' => 'POST',
+    'json'   => ['name' => 'Ada', 'role' => 'admin'],
+]);
+
+// HTTP errors throw by default (2.7.0): exception code = HTTP status
+try {
+    $body = NanoCore::curlRequest('https://api.example.com/users');
+} catch (\Exception $e) {
+    $status = $e->getCode(); // e.g. 429
+}
+// Set 'ignore_http_errors' => true to get 4xx/5xx bodies back instead (pre-2.7.0 behavior)
+
 // Skip JSON decoding (e.g. HTML responses)
 $html = NanoCore::curlRequest('https://example.com/page', [
     'raw' => true,
@@ -539,6 +565,7 @@ $html = NanoCore::curlRequest('https://example.com/page', [
 // Get response with metadata (status code, content type, headers)
 $info = NanoCore::curlRequest('https://api.example.com/users', [
     'with_info' => true,
+    'ignore_http_errors' => true, // with_info does not suppress the HTTP error throw
 ]);
 // $info = ['body' => ..., 'status' => 200, 'content_type' => 'application/json', 'headers' => [...]]
 ```
@@ -550,22 +577,27 @@ $info = NanoCore::curlRequest('https://api.example.com/users', [
 | `method` | string | `'GET'` | HTTP method (case-insensitive) |
 | `params` | array | `[]` | Request parameters (query string for GET, POST body otherwise) |
 | `headers` | array | `[]` | HTTP headers |
+| `json` | mixed | none | JSON body for `POST`/`PUT`/`DELETE`/`PATCH` — encoded and sent as the request body; `Content-Type: application/json` is set automatically unless you pass your own (case-insensitive). Cannot be combined with `params` or used with `GET`/`HEAD` (`InvalidArgumentException`) |
 | `raw` | bool | `false` | Skip JSON decoding, return raw string |
 | `with_info` | bool | `false` | Return `['body'=>mixed,'status'=>int,'content_type'=>string|null,'headers'=>array<string,string[]>]` instead of just the body |
+| `ignore_http_errors` | bool | `false` | `true`: return 4xx/5xx responses like any other response instead of throwing (pre-2.7.0 behavior) |
 | `CURLOPT_*` | mixed | varies | Any curl constant — merged directly into curl options |
 
 Features:
 
 - Automatic JSON decoding (returns raw string if not valid JSON, or when `raw` is true)
+- One-shot JSON body via `json` (2.7.0) — body encoded + `Content-Type: application/json` injected unless you send your own; `json` + `params` or `json` with `GET`/`HEAD` throw `InvalidArgumentException`
+- HTTP errors throw by default (2.7.0, breaking) — final status ≥ 400 throws an exception whose `code` is the HTTP status and whose message is `External request returned HTTP <status>` (+ 200-char body snippet); `ignore_http_errors => true` restores the old return; 3xx are always successes; `with_info` does not suppress the throw
+- Transport failures report the cURL code and reason (`External request failed (cURL <code>[: reason])`, exception code 0 — cURL 28 messages still contain `timed out`)
 - CURLOPT passthrough — any `CURLOPT_*` constant can be passed to override defaults
 - Streaming support via `CURLOPT_WRITEFUNCTION` — method returns `true` on success, body consumed by callback
-- Request logging to `nanocore.log` (method, URL, status code, duration, params, response)
-- Up to 5 retries with linear backoff (100ms, 200ms, 300ms...)
+- Request logging to `nanocore.log` (method, URL, status code, duration, params, response) — transport failures are logged too (`failed after <n> attempts`); entries are stripped of CR/LF/VT/FF/U+2028/U+2029 to a single line; a failed write falls back to `error_log()`
+- Up to 5 retries with linear backoff (100ms, 200ms, 300ms...) on `GET`/`HEAD` only — non-idempotent methods (`POST`, `PUT`, `DELETE`, `PATCH`) are never retried
 - 30s connect timeout, 30s total timeout (overridable via CURLOPT)
-- SSRF protection: only `http`/`https` schemes, blocks private/restricted IPs, resolves DNS (A + AAAA) to validate
-- `CURLOPT_FOLLOWLOCATION` forced `false` for SSRF safety
-- Credentials stripped from logged URLs; sensitive `params` keys (`password`, `token`, `secret`, `key`, `auth`, `credential`) masked as `***` in logged params and query strings
-- Response body truncated to 500 chars in logs
+- SSRF protection: only `http`/`https` schemes, blocks private/restricted IPs, resolves DNS (A + AAAA) to validate; curl is pinned to the validated IPs via `CURLOPT_RESOLVE` (no DNS rebinding window); fail-closed — hostnames that resolve to no address and hosts ending with a dot are rejected. **`curlRequest` validates and pins internally — do not wrap it in your own URL validation/pinning**
+- `CURLOPT_FOLLOWLOCATION` forced `false` for SSRF safety; caller `CURLOPT_RESOLVE` overrides are ignored (pins win)
+- Credentials stripped from logged URLs; sensitive `params`/`json` keys (`password`, `token`, `secret`, `key`, `auth`, `credential`) masked as `***` in logged params and query strings; non-array `json` bodies logged as `[json body]`
+- Response bodies that decode to a JSON array are masked (`***` on sensitive keys) before logging; response body truncated to 500 chars in logs
 - Retry reinitializes the curl handle between attempts (`curl_init`). CurlHandle objects are freed automatically.
 
 ### Batch Requests
@@ -582,7 +614,7 @@ $results = NanoCore::curlRequest([
 ```
 
 - Max 10 concurrent handles; excess URLs are queued and processed as slots open
-- Per-URL retry (5 attempts, linear backoff 100ms-400ms) — non-blocking, timestamp-based
+- Per-URL retry on `GET`/`HEAD` only (5 attempts, linear backoff 100ms-400ms) — non-blocking, timestamp-based; non-idempotent methods fail on the first transport error
 - Batch failures return `Exception` objects in the results array (batch continues, does not abort)
 - Empty array `[]` returns `[]` immediately
 - All options (`with_info`, `raw`, `method`, `params`, `headers`, CURLOPT_*) apply to every URL in the batch
@@ -606,7 +638,7 @@ NanoCore::validateUrlNotRestricted('https://api.example.com');
 NanoCore::validateIpNotRestricted('192.168.1.1');  // Throws — private IP
 ```
 
-IPv6 bracket stripping blocks `[::1]`, `[::ffff:127.0.0.1]` and similar loopback variants.
+IPv6 bracket stripping blocks `[::1]`, `[::ffff:127.0.0.1]` and similar loopback variants. Hostnames that resolve to no address and hosts ending with a dot are rejected (fail-closed).
 
 ## Request Body
 
@@ -689,7 +721,7 @@ NanoCore has security protections built in:
 
 | Protection | Where | Description |
 | --- | --- | --- |
-| **SSRF Prevention** | `curlRequest`, `validateUrlNotRestricted`, `validateIpNotRestricted` | Only http/https URLs. Blocks private IPs, localhost, restricted ranges, IPv6 brackets. DNS resolution (A + AAAA) checked. `FOLLOWLOCATION` disabled. |
+| **SSRF Prevention** | `curlRequest`, `validateUrlNotRestricted`, `validateIpNotRestricted` | Only http/https URLs. Blocks private IPs, localhost, restricted ranges, IPv6 brackets. DNS resolution (A + AAAA) checked. `FOLLOWLOCATION` disabled. Validated IPs pinned via `CURLOPT_RESOLVE`. Unresolvable and trailing-dot hosts rejected. |
 | **CRLF Injection** | `redirect()` | CR/LF characters stripped from redirect URLs |
 | **Path Traversal** | `renderHtml()` | `DIRECTORY_SEPARATOR` appended to root path prevents traversal |
 | **SQL Injection** | NanoORM | All identifiers validated. Field names backtick-quoted in queries. PDO prepared statements for all values. Note: `findBy()`/`findAll()`/`deleteWhere()` accept arbitrary WHERE — caller must ensure safe SQL. |
@@ -701,10 +733,11 @@ NanoCore has security protections built in:
 | **Throwable Catching** | `run()` | Catches `\Throwable` not just `\Exception` |
 | **Credential Logging** | `curlRequest` | Credentials stripped from logged URLs; sensitive params/query values masked |
 | **Response Log Truncation** | `curlRequest` | Response body truncated to 500 chars in logs |
+| **Log Forging** | `curlRequest` | Entire log line CR/LF-stripped — crafted responses cannot forge entries; failed writes fall back to `error_log()` |
 
 ### Known Limitations
 
-- **DNS rebinding TOCTOU**: DNS resolution is checked before the request, but the actual connection may resolve to a different IP. This is a known limitation of client-side SSRF validation.
+- **DNS rebinding (standalone validation)**: `curlRequest()` pins curl to the validated IPs, but if you call `validateUrlNotRestricted()` yourself and perform the request with another client, the validation-vs-connection TOCTOU still applies.
 - **`executeSqlFile` naive `;` split**: Migration SQL files are split on `;` — semicolons inside string literals or comments will break the statement.
 - **`paginate()` throws if JOINs registered**: Pagination does not support joined queries. Use `fetchWithJoins()` or call `clear()` first.
 - **`CURLOPT_MAXREDIRS` ineffective**: `CURLOPT_MAXREDIRS=5` is set in defaults but has no effect because `CURLOPT_FOLLOWLOCATION` is force-disabled for SSRF safety. Redirects are NOT followed.

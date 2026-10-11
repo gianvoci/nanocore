@@ -68,7 +68,7 @@ See [http-client/spec.md](http-client/spec.md) and [integrations/outbound-http.m
 
 | Method | Args | Returns | Throws |
 | --- | --- | --- | --- |
-| `curlRequest` | `string\|array $url, array $options = []` | body / `with_info` array; batch: list in input order | `\Exception` invalid/restricted URL, single request exhausted |
+| `curlRequest` | `string\|array $url, array $options = []` | body / `with_info` array; batch: list in input order | `\Exception` invalid/restricted URL, single transport failure after retries (code 0), single HTTP ≥ 400 (code = HTTP status) unless `ignore_http_errors => true`; batch: `\Exception` in the failed slot |
 | `validateUrlNotRestricted` | `string $url` | `void` | `\Exception` |
 | `validateIpNotRestricted` | `string $ip` | `void` | `\Exception` |
 

@@ -26,6 +26,10 @@ class NanoCore
 
     private const REDACTED_VALUE = '***';
 
+    // Line/paragraph separators and control breaks a forged value could hide to split a log line
+    // for a Unicode-aware consumer, alongside CR/LF.
+    private const LOG_LINE_BREAKS = ["\r", "\n", "\x0b", "\x0c", "\xE2\x80\xA8", "\xE2\x80\xA9"];
+
     private const ALLOWED_INI_SETTINGS = [
         'display_errors',
         'error_log',
@@ -1168,12 +1172,27 @@ class NanoCore
      * Validate that a URL does not resolve to a restricted IP address.
      * Hostnames are resolved for both A (IPv4) and AAAA (IPv6) records.
      *
-     * Known limitation: DNS rebinding attacks can bypass this check because
-     * DNS resolution happens twice (once here via gethostbynamel and dns_get_record, once by curl).
-     * Between the two resolutions, DNS could return a different IP.
-     * For critical security, consider using CURLOPT_RESOLVE to pin the validated IP.
+     * Note: the DNS rebinding limitation no longer applies to curlRequest(), which pins the
+     * validated IPs via CURLOPT_RESOLVE. Callers who validate here and then perform their own
+     * request are still exposed to rebinding between this check and their own DNS resolution.
+     *
+     * Fail-closed: hostnames that PHP cannot resolve and hosts ending with a dot are rejected,
+     * so curl never resolves an address this validation has not checked.
      */
     public static function validateUrlNotRestricted(string $url): void
+    {
+        self::resolveSsrfPins($url);
+    }
+
+    /**
+     * Validate a URL and return CURLOPT_RESOLVE entries pinning curl to the validated IPs.
+     *
+     * @param string $url The URL to validate.
+     * @throws \Exception When the URL is invalid, uses a disallowed scheme, resolves to a restricted IP,
+     *                     cannot be resolved by PHP, or its host ends with a dot.
+     * @return string[] One entry per URL: 'host:port:ip[,ip...]' ([] = literal-IP host, no pin needed).
+     */
+    private static function resolveSsrfPins(string $url): array
     {
         $parsed = parse_url($url);
 
@@ -1197,17 +1216,23 @@ class NanoCore
             $host = mb_substr($host, 1, -1);
         }
 
+        // Fail-closed: curl's CURLOPT_RESOLVE cache can miss 'host.' entries and silently
+        // re-resolve DNS, which would reopen the rebinding window the pin is meant to close.
+        if (str_ends_with($host, '.')) {
+            throw new \Exception("URL host must not end with a dot");
+        }
+
         // Block well-known internal hostnames
         $blockedHosts = ['localhost', 'localhost.localdomain', 'ip6-localhost', 'ip6-loopback'];
         if (in_array(strtolower($host), $blockedHosts, true)) {
             throw new \Exception("URL points to a restricted network address");
         }
 
-        // If the host is a direct IP, validate it
+        // If the host is a direct IP, validate it — curl connects directly, no pin needed
         $ip = filter_var($host, FILTER_VALIDATE_IP);
         if ($ip) {
             self::validateIpNotRestricted($ip);
-            return;
+            return [];
         }
 
         // For hostnames, resolve DNS and check the resulting IPs
@@ -1215,13 +1240,24 @@ class NanoCore
         $ipv6 = array_column(@dns_get_record($host, DNS_AAAA) ?: [], 'ipv6');
         $resolvedIps = array_merge($ipv4, $ipv6);
         if (empty($resolvedIps)) {
-            // Hostname doesn't resolve — let curl handle the error
-            return;
+            // Fail-closed: curl must only ever connect to IPs this validation has checked —
+            // an unresolvable-by-PHP hostname passing through would let curl resolve unchecked.
+            throw new \Exception("URL host could not be resolved");
         }
 
         foreach ($resolvedIps as $resolvedIp) {
             self::validateIpNotRestricted($resolvedIp);
         }
+
+        // One RESOLVE entry per host:port with all validated IPs — multiple entries for the same
+        // host:port discard each other in curl's DNS cache (last one wins). curl rotates through
+        // comma-separated addresses like DNS round-robin; IPv6 addresses must be bracketed.
+        $addresses = array_map(
+            static fn(string $ip): string => str_contains($ip, ':') ? "[{$ip}]" : $ip,
+            $resolvedIps
+        );
+        $port = (int) ($parsed['port'] ?? ($scheme === 'https' ? 443 : 80));
+        return ["{$host}:{$port}:" . implode(',', $addresses)];
     }
 
     /**
@@ -1279,6 +1315,40 @@ class NanoCore
     }
 
     /**
+     * Whether the caller-supplied header list already declares a Content-Type.
+     *
+     * @param array $headers List of raw header lines ("Name: value").
+     * @return bool True when a Content-Type header is present (case-insensitive, leading whitespace ignored).
+     */
+    private static function headersContainContentType(array $headers): bool
+    {
+        foreach ($headers as $header) {
+            $sep = strpos((string) $header, ':');
+            // Trim the name so "Content-Type : x" is still recognised and not duplicated
+            if ($sep !== false && strcasecmp(trim(substr((string) $header, 0, $sep)), 'Content-Type') === 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Append a single line to nanocore.log, falling back to error_log() when the file is not writable.
+     *
+     * Callers must guarantee self::$logBasePath is set. Line/paragraph breaks are stripped so a
+     * crafted method, URL or response cannot forge additional log lines.
+     *
+     * @param string $logLine The line to append (without trailing newline).
+     */
+    private static function appendLogLine(string $logLine): void
+    {
+        $line = str_replace(self::LOG_LINE_BREAKS, ' ', $logLine);
+        if (@file_put_contents(self::$logBasePath . '/nanocore.log', $line . PHP_EOL, FILE_APPEND | LOCK_EX) === false) {
+            error_log($line);
+        }
+    }
+
+    /**
      * A function to make a cURL request to a specified URL with optional parameters and headers.
      *
      * @param string|array $url The URL(s) to make the request to. String for single, array for batch.
@@ -1289,11 +1359,18 @@ class NanoCore
      *                       - 'headers': HTTP headers. Defaults to [].
      *                       - 'raw': bool, skip JSON decoding. Defaults to false.
      *                       - 'with_info': bool, return ['body'=>mixed,'status'=>int,'content_type'=>string|null,'headers'=>array<string,string[]>] instead of just the body. Defaults to false.
+     *                       - 'json': JSON-encodable body sent as-is with an injected 'Content-Type: application/json'.
+     *                         Mutually exclusive with 'params'; rejected for GET/HEAD. Retries re-use the encoded body.
+     *                       - 'ignore_http_errors': bool, return the (error) body for HTTP >= 400 instead of throwing.
+     *                         Defaults to false. Has no effect on transport failures.
      *                       CURLOPT keys (int):
      *                       Any CURLOPT_* constant can be passed to override the default curl settings.
      *                       Examples: CURLOPT_TIMEOUT, CURLOPT_CONNECTTIMEOUT, CURLOPT_WRITEFUNCTION.
      *                       These are merged directly into the curl options array.
-     * @throws \Exception When an error occurs during the cURL request.
+     * @throws \InvalidArgumentException When 'json' and 'params' are both set, or 'json' is used with GET/HEAD.
+     * @throws \Exception On transport failure, or (unless 'ignore_http_errors' is true) when the HTTP status is >= 400,
+     *                    in which case the exception code is the HTTP status and the message starts with
+     *                    "External request returned HTTP {code}".
      * @return mixed The response from the cURL request, decoded as JSON if possible. With 'with_info', returns ['body'=>mixed,'status'=>int,'content_type'=>string|null,'headers'=>array<string,string[]>]. For batch, returns array of results in input order.
      */
     public static function curlRequest(string|array $url, array $options = []): mixed
@@ -1305,22 +1382,46 @@ class NanoCore
             return [];
         }
 
-        // Validate all URLs upfront
-        foreach ($urls as $u) {
-            self::validateUrlNotRestricted($u);
+        // Validate all URLs upfront and collect DNS pins per index
+        $resolvePins = [];
+        foreach ($urls as $i => $u) {
+            $resolvePins[$i] = self::resolveSsrfPins($u);
         }
 
         $startTime = hrtime(true);
 
         // Extract logical options with defaults
         $method   = strtoupper($options['method'] ?? 'GET');
+        // Only idempotent methods are safe to replay: a timed-out POST/PUT/DELETE/PATCH may already
+        // have been processed server-side, so retrying would duplicate side effects.
+        $retryable = in_array($method, ['GET', 'HEAD'], true);
         $params   = $options['params']   ?? [];
         $headers  = $options['headers']  ?? [];
         $raw      = $options['raw']      ?? false;
         $withInfo = $options['with_info'] ?? false;
+        $json     = $options['json']     ?? null;
+        $ignoreHttpErrors = $options['ignore_http_errors'] ?? false;
+
+        // Validate conflicting or unsupported option combinations before any handle is created
+        if ($json !== null && !empty($params)) {
+            throw new \InvalidArgumentException("Use either 'params' or 'json'");
+        }
+        if ($json !== null && in_array($method, ['GET', 'HEAD'], true)) {
+            throw new \InvalidArgumentException("Option 'json' is not supported with GET/HEAD");
+        }
+
+        // Encode the JSON body once, before any handle or multi handle exists: a failure here must
+        // abort the whole call, not throw mid-batch with live handles and an open $mh.
+        $jsonBody = null;
+        if ($json !== null) {
+            $jsonBody = json_encode($json);
+            if ($jsonBody === false) {
+                throw new \Exception("JSON body encoding failed", 500);
+            }
+        }
 
         // Remove logical keys — whatever remains are CURLOPT_* constants
-        unset($options['method'], $options['params'], $options['headers'], $options['raw'], $options['with_info']);
+        unset($options['method'], $options['params'], $options['headers'], $options['raw'], $options['with_info'], $options['json'], $options['ignore_http_errors']);
 
         // Base curl options — caller overrides merged into defaults
         $baseCurlopt = array_replace([
@@ -1335,6 +1436,10 @@ class NanoCore
         // ponytail: force SSRF protection over any caller override
         $baseCurlopt[CURLOPT_FOLLOWLOCATION] = false;
 
+        // A caller CURLOPT_RESOLVE must never defeat or widen the SSRF pin: it survives otherwise
+        // on unpinned URLs (literal IP or unresolvable host), where no internal pin overwrites it.
+        unset($baseCurlopt[CURLOPT_RESOLVE]);
+
         $maxRetries  = 5;
         $backoffMs   = [100, 200, 300, 400]; // retries 1-4
         $maxConcurrent = 10;
@@ -1345,7 +1450,7 @@ class NanoCore
         $activeHandles = 0;
 
         // Build curl options + init handle for a single URL
-        $initHandle = function (string $url) use ($baseCurlopt, $method, $params, $headers): array {
+        $initHandle = function (string $url, array $pins) use ($baseCurlopt, $method, $params, $headers, $json, $jsonBody): array {
             $curlopt  = $baseCurlopt;
             $finalUrl = $url;
             $curlopt[CURLOPT_CUSTOMREQUEST] = $method;
@@ -1358,10 +1463,26 @@ class NanoCore
                 }
             }
 
+            // Body encoded once up front; retries re-use the stored curlopt, keeping the body stable
+            if ($jsonBody !== null) {
+                $curlopt[CURLOPT_POSTFIELDS] = $jsonBody;
+            }
+
             $curlopt[CURLOPT_URL] = $finalUrl;
 
-            if (!empty($headers)) {
-                $curlopt[CURLOPT_HTTPHEADER] = $headers;
+            // Pin the pre-validated IPs: curl must not resolve DNS again (DNS rebinding TOCTOU).
+            // Set after caller overrides are merged, so a caller CURLOPT_RESOLVE cannot defeat the guard.
+            if ($pins !== []) {
+                $curlopt[CURLOPT_RESOLVE] = $pins;
+            }
+
+            // Caller headers keep their order; the json Content-Type is appended last unless already present
+            $requestHeaders = $headers;
+            if ($json !== null && !self::headersContainContentType($headers)) {
+                $requestHeaders[] = 'Content-Type: application/json';
+            }
+            if (!empty($requestHeaders)) {
+                $curlopt[CURLOPT_HTTPHEADER] = $requestHeaders;
             }
 
             // Each handle gets its own header collector (object = always by reference in PHP)
@@ -1400,7 +1521,7 @@ class NanoCore
         // Seed initial batch (up to maxConcurrent)
         $seedCount = min($maxConcurrent, count($urls));
         for ($i = 0; $i < $seedCount; $i++) {
-            $handleDataByIndex[$i] = $initHandle($urls[$i]);
+            $handleDataByIndex[$i] = $initHandle($urls[$i], $resolvePins[$i]);
             curl_multi_add_handle($mh, $handleDataByIndex[$i]['ch']);
             $activeHandles++;
         }
@@ -1411,7 +1532,7 @@ class NanoCore
             // Add queued URLs when slots open
             while ($activeHandles < $maxConcurrent && $nextQueueIdx < count($urls)) {
                 $i = $nextQueueIdx++;
-                $handleDataByIndex[$i] = $initHandle($urls[$i]);
+                $handleDataByIndex[$i] = $initHandle($urls[$i], $resolvePins[$i]);
                 curl_multi_add_handle($mh, $handleDataByIndex[$i]['ch']);
                 $activeHandles++;
             }
@@ -1506,6 +1627,9 @@ class NanoCore
                 $responseBody = curl_multi_getcontent($ch);
                 $httpCode     = curl_getinfo($ch, CURLINFO_HTTP_CODE);
                 $contentType  = curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
+                // Capture the error text before removing the handle — curl_error is unreliable afterwards
+                $curlErr      = curl_error($ch);
+                $curlErrCode  = $info['result'];
 
                 curl_multi_remove_handle($mh, $ch);
                 $activeHandles--;
@@ -1513,17 +1637,39 @@ class NanoCore
                 if ($info['result'] !== CURLE_OK) {
                     // Handle-level failure — schedule retry or exhaust
                     $handleDataByIndex[$foundIdx]['retries']++;
-                    if ($handleDataByIndex[$foundIdx]['retries'] < $maxRetries) {
+                    if ($retryable && $handleDataByIndex[$foundIdx]['retries'] < $maxRetries) {
                         $handleDataByIndex[$foundIdx]['retryAt'] = hrtime(true)
                             + ($backoffMs[$handleDataByIndex[$foundIdx]['retries'] - 1] * 1_000_000);
                         $handleDataByIndex[$foundIdx]['ch'] = null;
                     } else {
-                        // Exhausted all retries
+                        // Exhausted all retries. The message keeps the "External request failed" prefix and,
+                        // for cURL 28, curl's own "timed out" wording (a downstream consumer string-matches it).
+                        $attempts       = $handleDataByIndex[$foundIdx]['retries'];
+                        $failureMessage = "External request failed (cURL {$curlErrCode}"
+                            . ($curlErr !== '' ? ": {$curlErr}" : '') . ")";
+
+                        if (self::$logBasePath !== null) {
+                            $failedUrl = self::maskUrlQuery(preg_replace(
+                                '#^(https?://)[^@]+@#',
+                                '$1',
+                                $handleDataByIndex[$foundIdx]['curlopt'][CURLOPT_URL]
+                            ));
+                            self::appendLogLine(sprintf(
+                                '[%s] curlRequest %s %s -> failed after %d attempts (cURL %d: %s)',
+                                date('Y-m-d H:i:s'),
+                                $method,
+                                $failedUrl,
+                                $attempts,
+                                $curlErrCode,
+                                $curlErr
+                            ));
+                        }
+
                         if ($isSingle) {
                             curl_multi_close($mh);
-                            throw new \Exception("External request failed");
+                            throw new \Exception($failureMessage);
                         }
-                        $results[$foundIdx] = new \Exception("External request failed");
+                        $results[$foundIdx] = new \Exception($failureMessage);
                         unset($handleDataByIndex[$foundIdx]);
                     }
                     continue;
@@ -1553,8 +1699,10 @@ class NanoCore
                 continue;
             }
 
-            // Safety guard against null results (should not happen)
+            // Safety guard against null results (should not happen): keep the slot as an Exception
+            // so batch ordering is preserved instead of silently leaving a hole
             if ($result === null) {
+                $finalResults[$i] = new \Exception("Request produced no result", 500);
                 continue;
             }
 
@@ -1568,9 +1716,19 @@ class NanoCore
             if (self::$logBasePath !== null) {
                 $handleStartTime = $result['startTime'] ?? $startTime;
                 $duration  = (int) ((hrtime(true) - $handleStartTime) / 1_000_000);
-                $paramsStr = is_array($params)
-                    ? json_encode(self::maskSensitiveParams($params), JSON_UNESCAPED_SLASHES)
-                    : '[raw body]';
+
+                if ($jsonBody !== null) {
+                    // Mask on the decoded form: a stdClass json decodes to an array and is masked like
+                    // params; a scalar json could embed secrets, so log a constant placeholder instead.
+                    $normalized = json_decode($jsonBody, true);
+                    $paramsStr = is_array($normalized)
+                        ? json_encode(self::maskSensitiveParams($normalized), JSON_UNESCAPED_SLASHES)
+                        : '[json body]';
+                } elseif (is_array($params)) {
+                    $paramsStr = json_encode(self::maskSensitiveParams($params), JSON_UNESCAPED_SLASHES);
+                } else {
+                    $paramsStr = '[raw body]';
+                }
 
                 // Strip userinfo from URL before logging to avoid credential disclosure
                 $safeUrl = self::maskUrlQuery(preg_replace('#^(https?://)[^@]+@#', '$1', $curlopt[CURLOPT_URL]));
@@ -1578,11 +1736,17 @@ class NanoCore
                 if (isset($curlopt[CURLOPT_WRITEFUNCTION])) {
                     $logBody = '[streamed]';
                 } else {
-                    $logBody = mb_substr((string) $responseBody, 0, 500, 'UTF-8')
-                        . (mb_strlen((string) $responseBody) > 500 ? '... [truncated]' : '');
+                    // Mask keys inside a JSON response so credentials echoed back are not persisted
+                    $decodedBody = json_decode((string) $responseBody, true);
+                    $logResponse = is_array($decodedBody)
+                        ? json_encode(self::maskSensitiveParams($decodedBody))
+                        : (string) $responseBody;
+                    $logBody = mb_substr($logResponse, 0, 500, 'UTF-8')
+                        . (mb_strlen($logResponse) > 500 ? '... [truncated]' : '');
                 }
 
-                $logLine = sprintf(
+                // appendLogLine strips CR/LF so a crafted method/URL/response cannot forge additional lines
+                self::appendLogLine(sprintf(
                     '[%s] curlRequest %s %s -> %d (%dms) | params: %s | response: %s',
                     date('Y-m-d H:i:s'),
                     $method,
@@ -1591,8 +1755,21 @@ class NanoCore
                     $duration,
                     $paramsStr,
                     $logBody
-                );
-                file_put_contents(self::$logBasePath . '/nanocore.log', $logLine . PHP_EOL, FILE_APPEND | LOCK_EX);
+                ));
+            }
+
+            // HTTP >= 400 is a failure by default: throw with the status as the code unless the caller opts out
+            $httpStatus = (int) $httpCode;
+            if (!$ignoreHttpErrors && $httpStatus >= 400) {
+                $snippet = str_replace(self::LOG_LINE_BREAKS, '', mb_substr((string) $responseBody, 0, 200, 'UTF-8'));
+                $message = "External request returned HTTP {$httpStatus}"
+                    . ((string) $responseBody !== '' ? ': ' . $snippet : '');
+                $httpException = new \Exception($message, $httpStatus);
+                if ($isSingle) {
+                    throw $httpException;
+                }
+                $finalResults[$i] = $httpException;
+                continue;
             }
 
             // Determine the response body value

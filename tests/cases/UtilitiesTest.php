@@ -240,7 +240,7 @@ $tests[] = function () {
 
 // Test 20: curlRequest with_info returns correct status for non-200
 $tests[] = function () {
-    $result = NanoCore::curlRequest('https://httpbin.org/status/418', ['with_info' => true, 'raw' => true]);
+    $result = NanoCore::curlRequest('https://httpbin.org/status/418', ['with_info' => true, 'raw' => true, 'ignore_http_errors' => true]);
     assertTrue(is_array($result), 'with_info with non-200 should return an array');
     if ($result['status'] === 503) {
         return;

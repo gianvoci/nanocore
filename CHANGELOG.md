@@ -1,5 +1,29 @@
 # Changelog
 
+## [2.7.0] - 2026-10-11 - feat(http-client): JSON body option, HTTP error exceptions, log hardening
+
+- **Breaking**: `curlRequest` now throws on final HTTP status ≥ 400 — single URL throws, batch stores an `\Exception` in the failed slot. Exception `code` = HTTP status; message `External request returned HTTP <status>` (+ first 200 chars of the body, line breaks stripped, when non-empty). Set `ignore_http_errors => true` to restore the pre-2.7.0 return behavior. Statuses < 400 (incl. 3xx) are always successes; `with_info` does not suppress the throw
+- New `json` option: one-shot JSON body — `json_encode` runs once before any handle exists; `Content-Type: application/json` is appended unless the caller sends one (case-insensitive, whitespace-tolerant detection). `json` + `params` and `json` with `GET`/`HEAD` throw `\InvalidArgumentException`; `json_encode` failure throws code 500
+- Transport failures now carry the cURL code and reason: `External request failed (cURL <code>[: reason])` (exception code still 0). The message keeps the `External request failed` prefix and cURL's `timed out` wording for consumers matching on text
+- Transport failures are now logged too (`failed after <n> attempts (cURL ...)`); previously only completed responses were logged
+- Response bodies decoding to a JSON array are masked (`***` on sensitive keys) before the 500-char log truncation; non-array `json` option values are logged as `[json body]`
+- Log lines and the HTTP-error body snippet are stripped of CR, LF, VT, FF, U+2028, U+2029 (new `LOG_LINE_BREAKS` constant) — forging hardened for Unicode-aware log consumers
+- Documented that `curlRequest` validates and pins SSRF-safe IPs internally and discards caller `CURLOPT_RESOLVE` — consumers must not duplicate validation/pinning around it
+- Updated `tests/cases/CurlRequestTest.php` (Tests 26-35) and `tests/cases/UtilitiesTest.php` (Test 20); updated specs, README; added `MIGRATION-to-2.7.0.md`
+
+---
+
+## [2.6.0] - 2026-10-11 - feat(security): SSRF IP pinning, idempotent-only retry, log hardening
+
+- `curlRequest` pins every handle to the IPs validated upfront via `CURLOPT_RESOLVE` — the DNS rebinding (TOCTOU) window between validation and curl's own resolution is closed; caller `CURLOPT_RESOLVE` overrides are ignored
+- `curlRequest` retries transport errors only for idempotent methods (`GET`, `HEAD`); `POST`/`PUT`/`DELETE`/`PATCH` now fail on the first transport error (a timed-out non-idempotent request may already have been processed server-side)
+- `curlRequest` log entries are CR/LF-stripped to a single line (a crafted response can no longer forge log lines); failed log writes fall back to `error_log()` instead of throwing
+- SSRF validation is fail-closed: hostnames that resolve to no address throw `URL host could not be resolved`; hosts ending with a dot throw `URL host must not end with a dot` (curl's `CURLOPT_RESOLVE` cache can miss `host.` entries and silently re-resolve DNS)
+- `validateUrlNotRestricted()` signature and messages unchanged; standalone callers performing their own request are still exposed to DNS rebinding
+- Updated `tests/cases/CurlRequestTest.php` (3 new tests), specs, README; added `MIGRATION-to-2.6.0.md`
+
+---
+
 ## [2.5.1] - 2026-10-09 - fix(security): non-breaking hardening
 
 - `configSet`: protected-key check now matches `PHP.INI.*` and ancestors like `PHP` (was bypassed); rejects keys/values that could inject `.env` lines

@@ -36,7 +36,7 @@ php tests/runAllTests.php                            # full suite
 - The constructor installs global error/exception handlers: every PHP warning becomes `ErrorException` (except `@`-suppressed)
 - HTTP status = exception code (`throw new \Exception('Not found', 404)`); codes outside 100–599 become 500
 - Never interpolate values into SQL; identifiers must pass `^[a-zA-Z_][a-zA-Z0-9_]*$` and be backtick-quoted
-- Every outbound URL goes through `validateUrlNotRestricted()`; `CURLOPT_FOLLOWLOCATION` stays forced `false`
+- Every outbound URL goes through `validateUrlNotRestricted()`; `CURLOPT_FOLLOWLOCATION` stays forced `false`; the `CURLOPT_RESOLVE` SSRF pin cannot be overridden by callers
 - Anything written to `nanocore.log` must be masked/stripped (credentials, CR/LF)
 - Public signatures are a contract for consumers: adding a parameter to an overridable method (e.g. `NanoORM::fill`) is breaking — add a new method instead
 
