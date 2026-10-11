@@ -1,6 +1,6 @@
-# Migration Guide: → 2.7.0
+# Migration Guide: → 2.7.2
 
-HTTP client release. One breaking behavior change: `curlRequest` now throws on HTTP ≥ 400 responses (opt-out available). Public signatures are unchanged.
+HTTP client release (all changes below shipped in v2.7.0; v2.7.1–v2.7.3 add no code changes). One breaking behavior change: `curlRequest` now throws on HTTP ≥ 400 responses (opt-out available). Public signatures are unchanged.
 
 ## Behavior Changes (aligned with specs)
 

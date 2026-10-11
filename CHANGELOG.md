@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.7.3] - 2026-10-11 - docs(release): align migration guide with the 2.7.x tags
+
+- `MIGRATION-to-2.7.2.md` (renamed from `MIGRATION-to-2.7.0.md` in the v2.7.2 tag) is now titled "→ 2.7.2" and notes that all its changes shipped in v2.7.0; `specs/http-client/spec.md` points to the new file name
+- No code changes: tags `v2.7.0` and `v2.7.1` point to the same commit and `v2.7.2` only renamed the migration file — `v2.7.3` exists to give Packagist a release with consistent docs
+
+---
+
 ## [2.7.0] - 2026-10-11 - feat(http-client): JSON body option, HTTP error exceptions, log hardening
 
 - **Breaking**: `curlRequest` now throws on final HTTP status ≥ 400 — single URL throws, batch stores an `\Exception` in the failed slot. Exception `code` = HTTP status; message `External request returned HTTP <status>` (+ first 200 chars of the body, line breaks stripped, when non-empty). Set `ignore_http_errors => true` to restore the pre-2.7.0 return behavior. Statuses < 400 (incl. 3xx) are always successes; `with_info` does not suppress the throw

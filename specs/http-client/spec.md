@@ -58,4 +58,4 @@ Static curl_multi client for single or batched outbound requests with retry, one
 
 - API: [api-routes.md](../api-routes.md#http-client--ssrf-guard-static)
 - Tests: `tests/cases/CurlRequestTest.php`, `tests/cases/UtilitiesTest.php`
-- Migration: `MIGRATION-to-2.7.0.md`
+- Migration: `MIGRATION-to-2.7.2.md`
