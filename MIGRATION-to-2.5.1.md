@@ -1,4 +1,4 @@
-# Migration Guide: → 2.5.0
+# Migration Guide: → 2.5.1
 
 Security hardening release. No breaking changes to the documented contract: public signatures, JSON response format, and defaults are unchanged.
 

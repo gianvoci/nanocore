@@ -11,7 +11,7 @@
 | New method/config key/option, new rejection of clearly invalid input, security hardening with unchanged defaults | minor |
 | Bug fix with no contract change, docs, tests | patch |
 
-3. Create `MIGRATION-to-{version}.md` in English, following `MIGRATION-to-2.5.0.md`: intro line, **Behavior Changes** (each with **Action**), **New Features** (with `.env`/PHP snippet), **Migration Checklist**.
+3. Create `MIGRATION-to-{version}.md` in English, following `MIGRATION-to-2.5.1.md`: intro line, **Behavior Changes** (each with **Action**), **New Features** (with `.env`/PHP snippet), **Migration Checklist**.
 4. Add a `## [{version}] - YYYY-MM-DD - <type>(<scope>): <summary>` entry at the top of `CHANGELOG.md`, bullets with backticked identifiers, followed by `---`.
 5. Update `README.md` sections for every public behavior change, and the affected `specs/` files.
 6. `php -l` both sources and `php tests/runAllTests.php` must pass.

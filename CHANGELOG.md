@@ -1,6 +1,6 @@
 # Changelog
 
-## [2.5.0] - 2026-10-09 - fix(security): non-breaking hardening
+## [2.5.1] - 2026-10-09 - fix(security): non-breaking hardening
 
 - `configSet`: protected-key check now matches `PHP.INI.*` and ancestors like `PHP` (was bypassed); rejects keys/values that could inject `.env` lines
 - Error handler ignores errors suppressed with the `@` operator only (`regex:` with invalid pattern returns a validation error instead of 500); `error_reporting`-excluded errors still throw
@@ -11,7 +11,7 @@
 - Unreadable `.env` throws `Cannot read config file` (fail-closed)
 - New `SESSION.COOKIE_SAMESITE` config key (validated before any session ini) and `sessionRegenerate()` method
 - New `NanoORM::fillOnly(array $data, array $allowed)` (mass-assignment protection); `fill()` unchanged
-- Added `tests/cases/SecurityHardeningTest.php`, updated specs, added `MIGRATION-to-2.5.0.md`
+- Added `tests/cases/SecurityHardeningTest.php`, updated specs, added `MIGRATION-to-2.5.1.md`
 - Translated `MIGRATION-to-2.2.4/2.3.0/2.3.1/2.4.0.md` to English; AGENTS.md now requires English migration files
 
 ---
